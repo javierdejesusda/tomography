@@ -122,7 +122,17 @@ class _Nodes:
     probability: Scores
 
     def score(self, rows: NDArray[np.float32]) -> Scores:
-        """Walks one node per live row until every row reaches a leaf."""
+        """Walks one node per live row until every row reaches a leaf.
+
+        A leaf has split column -1. At a split node a row goes left when
+        its value in the node's global column is at most the threshold.
+
+        Args:
+            rows: A float32 feature matrix in the global column order.
+
+        Returns:
+            The weighted positive class share of the leaf each row reaches.
+        """
         indices = np.arange(rows.shape[0])
         nodes = np.zeros(len(indices), dtype=np.int64)
         while indices.size:

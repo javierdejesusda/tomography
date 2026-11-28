@@ -375,6 +375,25 @@ def _draw_delta(
 def _baseline(
     config: Config, task: ReadingTask, splits: m2._Splits
 ) -> _Baseline:
+    """Fits the baseline readers on every draw at every readout.
+
+    For each readout, scorer in `BASE_SCORERS` and draw, the L2 LR is
+    tuned per layer on the select pairs and diff-means comes from M2
+    `_tuned`. Three layer rules read the same select metric: `best`
+    (first maximum), `top_k` (M2 `read_top_k`) and `best_deep` (deepest
+    maximum, `tie_break="last"`). A draw is tied when more than one layer
+    shares the maximum select pair accuracy.
+
+    Args:
+        config: The run configuration.
+        task: The reading task.
+        splits: The task's train, select and report activations.
+
+    Returns:
+        The `reader` entries per scorer, readout and rule, the tuned LR of
+        every draw per readout (reused by the new readers), and the
+        per-draw tie flags per scorer and readout.
+    """
     entries: list[m2._Entry] = []
     logistic: dict[m2.Readout, list[_TunedLR]] = {}
     ties: dict[tuple[str, m2.Readout], list[bool]] = {}
@@ -437,6 +456,19 @@ class _Prepared:
 
 
 def _tie_rows(source: _Prepared, take: int) -> list[dict[str, Any]]:
+    """Compares the `best` and `best_deep` layer rules per baseline.
+
+    Args:
+        source: A prepared task with its baseline fits.
+        take: Number of leading draws to summarize.
+
+    Returns:
+        One row per scorer and readout: the share of draws tied at the
+        maximum select pair accuracy, the share where the two rules pick
+        different layers, the per-draw flags, and per report condition the
+        per-draw AUROC and pair accuracy differences (`best_deep` minus
+        `best`).
+    """
     draws = {
         entry.cell: entry.choices[:take] for entry in source.baseline.entries
     }
@@ -826,6 +858,38 @@ def _stack_choices(
     *,
     pilot_diagnostics: bool = False,
 ) -> tuple[dict[tuple[str, str], m2._Choice], dict[str, Any]]:
+    """Reads the S14 layer aggregators from one draw's tuned layer LR.
+
+    `equal_mean` is M2 `read_top_k` over all layers (select
+    standardization). `weighted_mean` weights the same layers'
+    select-standardized scores by max(select pair accuracy - 0.5, 0) and
+    reuses the equal-mean choice when a chosen layer has constant select
+    scores. The stackers train on out-of-fold layer scores: in each
+    pair-grouped fold every layer reader is refit at its tuned penalty on
+    the fit pairs only; the out-of-fold scores set each layer's
+    standardization, and select and report scores come from the full-fit
+    readers standardized with the same statistics. `stack_lr` and
+    `stack_mlp` are tuned on select pair accuracy, `stack_mlp` averages
+    `config.mlp_repeats` seeds, and `stack_forest` draws from all layers.
+
+    Args:
+        config: The run configuration.
+        train: The draw's training rows.
+        select: The select rows.
+        report: Report activations per condition, shaped (layers, rows,
+            width).
+        tuned: The per-layer LR tuned on this draw's select pairs.
+        seed: Seed for the fold assignment and every fit.
+        pilot_diagnostics: Also fit five MLP seeds and record their select
+            AUROC and pair accuracy spreads, recommending five seeds when
+            the AUROC spread exceeds 0.01. The emitted MLP scores still
+            use `config.mlp_repeats` seeds.
+
+    Returns:
+        The choices keyed by (scorer, rule) and the fit diagnostics: layer
+        penalties, stacking LR penalty, MLP alpha, the weighted-mean
+        fallback flag and, with `pilot_diagnostics`, `mlp_pilot`.
+    """
     test = np.stack(
         [tuned.reader.score(rows) for rows in report], axis=1
     ).astype(np.float64)
@@ -984,6 +1048,30 @@ def _forest_choices(
     *,
     fixed_m: int | None = None,
 ) -> tuple[dict[str, m2._Choice], dict[str, int]]:
+    """Reads the grouped random-subspace forest on transformed layers.
+
+    Each layer of `transform(rows)` is one feature group. Without
+    `fixed_m`, m is tuned in (1, 6, 14, 28), capped at the number of
+    layers, on select pair accuracy and reported as `tuned`, next to
+    `default` with m = ceil(sqrt(layers)). The default reuses the grid fit
+    when its m is in the grid, and report rows are scored once when both
+    rules have the same m. With `fixed_m`, one forest is reported as
+    `fixed`.
+
+    Args:
+        config: The run configuration.
+        train: The draw's training rows.
+        select: The select rows.
+        report: Report activations per condition, shaped (layers, rows,
+            width).
+        transform: Maps rows shaped (layers, rows, width) to per-layer
+            features.
+        seed: Seed for the forest fits.
+        fixed_m: The number of layers per tree, when not tuned.
+
+    Returns:
+        The choices by rule and the m each rule used.
+    """
     fit_rows = transform(train.data)
     n_layers, _, width = fit_rows.shape
     train_features = _flatten(fit_rows)
@@ -1070,6 +1158,24 @@ def _ensemble_entries(
     source: _Prepared,
     take: int,
 ) -> tuple[list[m2._Entry], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Reads every S14 and S15 (ii)-(iv) reader on the leading draws.
+
+    For each readout and draw, the `reader` series reuses the baseline's
+    tuned LR. With `shuffled` in `config.controls`, a `shuffled` series
+    shuffles the train and select labels within pairs and retunes the
+    layer LR on them. Both series get the stackers and the vector forest;
+    the PCA forests, `concat_lr` and the bridge forest run on the `reader`
+    series only, as does the MLP pilot when `config.pilot_draws` is set.
+
+    Args:
+        config: The run configuration.
+        source: A prepared task with its baseline fits.
+        take: Number of leading draws to read.
+
+    Returns:
+        The entries per cell and series, one diagnostics row per readout,
+        draw and series, and the MLP pilot rows.
+    """
     entries: dict[tuple[m2.Cell, str], list[m2._Choice]] = {}
     diagnostics = []
     pilot = []
@@ -1165,6 +1271,26 @@ def _additional_choices(
     seed: int,
     choices: dict[tuple[str, str], m2._Choice],
 ) -> dict[str, Any]:
+    """Adds the `reader`-only S15 forests and the concatenation control.
+
+    Updates `choices` in place with the PCA forests (16 and 64 components
+    per layer, fitted on the training texts), `concat_lr` (one L2 LR on
+    the concatenated layers, M2 grid) and, when any `BRIDGE_LAYERS` are
+    present, the bridge forest on those layers with m = min(3, layers).
+
+    Args:
+        config: The run configuration.
+        train: The draw's training rows.
+        select: The select rows.
+        report: Report activations per condition, shaped (layers, rows,
+            width).
+        seed: Seed for the PCA and every fit.
+        choices: The draw's choices keyed by (scorer, rule), updated.
+
+    Returns:
+        The fit diagnostics: the m of each PCA forest rule, the
+        concatenation penalty and the bridge m.
+    """
     info: dict[str, Any] = {}
     for components in (16, 64):
         name = f"pca{components}_forest"
@@ -1207,6 +1333,21 @@ EQUAL_MEAN = "equal_mean"
 def _report_clusters(
     task: ReadingTask, items: StimulusSet, texts: Mapping[str, str]
 ) -> tuple[Indices, Indices]:
+    """Gives each report row and pair its bootstrap cluster.
+
+    Outside utility a row's cluster is its pair (loose rows their own)
+    and each pair is its own cluster. Utility pairs share scenarios, so a
+    union-find over the row and pair clusters merges every cluster whose
+    rows have the same text; rows and pairs then take their root.
+
+    Args:
+        task: The reading task.
+        items: The report items.
+        texts: The text of each stimulus uid.
+
+    Returns:
+        Cluster ids per row and per pair, on one shared index space.
+    """
     rows = m2._clusters(items.groups, len(items.labels))
     pairs = np.arange(len(items.groups))
     if task.name != "utility":
@@ -1549,6 +1690,26 @@ def _cross_task_rows(
     prepared: Sequence[_Prepared],
     take: int,
 ) -> list[dict[str, Any]]:
+    """Reads the S16 transfer matrix and pooled arms.
+
+    At each cross readout and draw, every task's tuned LR (rule `best`,
+    penalty and layer chosen on its own select) scores every task's
+    report items; AUROC is never re-oriented on the target task. With two
+    or more tasks, `pooled_all` (`n_pairs` per task) and `pooled_matched`
+    (the first `matched_pairs_per_task` pairs of each task's draw) fit one
+    LR on the pooled rows, read as `shared` (penalty and layer by mean
+    select pair accuracy over tasks) and `per_task` (chosen on the
+    evaluated task's select). Every row is compared with the evaluated
+    task's own classifier.
+
+    Args:
+        config: The run configuration.
+        prepared: The cross-task caches of every task.
+        take: Number of leading draws to read.
+
+    Returns:
+        The metric rows of the transfer and pooled arms.
+    """
     output = []
     for readout in CROSS_READOUTS:
         transfers: dict[tuple[int, int], list[_ScoredDraw]] = {}
@@ -1838,6 +1999,27 @@ def _lodo_rows(
     examples: Mapping[str, Sequence[Example]],
     take: int,
 ) -> list[dict[str, Any]]:
+    """Reads the S16 (c) holdouts in truth with negations.
+
+    For each holdout in `TRUTH_HOLDOUTS` (subset, topic, polarity), the
+    training, select and report examples are filtered by subset before
+    pairing. Three arms with the
+    same pair budget are tuned on their own select pairs: `held_out`
+    (the other subsets), `all_subsets` and `within_held` (the held
+    subsets alone). A training scope shared by holdouts is fitted once,
+    and every planned set is read in one `_truth_reader` pass. Per draw,
+    the report scores of all conditions are stacked in condition order,
+    and every arm is compared with `within_held`.
+
+    Args:
+        config: The run configuration.
+        loaded: The wrapped model.
+        examples: Examples by task name.
+        take: Number of draws.
+
+    Returns:
+        The metric rows with the holdout metadata.
+    """
     task = m2._task("truth_polarity")
     pool = task_splits(
         task, m2._task_examples(task.name, examples), seed=config.seed
@@ -1934,6 +2116,18 @@ def _lodo_rows(
 
 
 def _cross_cache(source: _Prepared) -> _Prepared:
+    """Keeps only what the cross-task reads need from a prepared task.
+
+    Drops the activations at positions outside `CROSS_READOUTS` and every
+    baseline entry and tie flag, keeping the tuned LR fits at those
+    readouts, so all tasks fit in memory together.
+
+    Args:
+        source: A prepared task.
+
+    Returns:
+        A trimmed copy of `source`.
+    """
     positions = tuple(m2.POSITION_OF[r] for r in CROSS_READOUTS)
     splits = source.splits
     return dataclasses.replace(
