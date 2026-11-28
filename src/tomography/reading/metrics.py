@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 import statistics
 from typing import Any
+from typing import Literal
 from typing import NamedTuple
 
 import numpy as np
@@ -198,20 +199,28 @@ def wilson_ci(
     return lower, upper
 
 
-def best_layer(acc: FloatArray, layers: Sequence[int]) -> int:
-    """Picks the layer with the highest accuracy, the first one on ties.
+def best_layer(
+    acc: FloatArray,
+    layers: Sequence[int],
+    *,
+    tie_break: Literal["first", "last"] = "first",
+) -> int:
+    """Picks the layer with the highest accuracy.
 
     Args:
         acc: Accuracy per layer, shape (K,).
         layers: The layer index of each entry of `acc`.
+        tie_break: Which exact maximum to keep, in input order.
 
     Returns:
         The layer index (an element of `layers`, not a position).
 
     Raises:
         ValueError: If `acc` is not a non-empty vector without NaN, or its
-            length differs from `layers`.
+            length differs from `layers`, or `tie_break` is unknown.
     """
+    if tie_break not in ("first", "last"):
+        raise ValueError(f"unknown tie_break: {tie_break!r}")
     values = np.asarray(acc, dtype=np.float64)
     if values.ndim != 1 or values.shape[0] == 0:
         raise ValueError(f"acc must be a non-empty vector, got {values.shape}")
@@ -219,6 +228,8 @@ def best_layer(acc: FloatArray, layers: Sequence[int]) -> int:
         raise ValueError("acc and layers must have the same length")
     if np.isnan(values).any():
         raise ValueError("acc must not contain NaN")
+    if tie_break == "last":
+        return int(layers[len(layers) - 1 - int(np.argmax(values[::-1]))])
     return int(layers[int(np.argmax(values))])
 
 
