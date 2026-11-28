@@ -506,12 +506,7 @@ def test_run_reports_mlp_seed_spread_in_a_two_draw_design(
         len(row["aurocs"]) == len(row["pair_accuracies"]) == 5 for row in rows
     )
     assert diagnostics["recommended_mlp_repeats"] == (
-        5
-        if any(
-            max(row["auroc_spread"], row["pair_accuracy_spread"]) > 0.01
-            for row in rows
-        )
-        else 1
+        5 if any(row["auroc_spread"] > 0.01 for row in rows) else 1
     )
     assert {
         row["n_seeds"]
@@ -839,6 +834,49 @@ def test_weighted_mean_takes_the_equal_mean_fallback_on_constant_layers(
     np.testing.assert_array_equal(weighted.select, equal.select)
     np.testing.assert_array_equal(weighted.report, equal.report)
     assert info["weighted_mean_fallback"] is True
+
+
+@pytest.mark.parametrize(
+    ("areas", "pairs", "expected"),
+    [
+        (
+            (0.80, 0.805, 0.808, 0.80, 0.80),
+            (0.70, 0.75, 0.80, 0.70, 0.70),
+            False,
+        ),
+        ((0.80, 0.82, 0.80, 0.80, 0.80), (0.70, 0.70, 0.70, 0.70, 0.70), True),
+    ],
+)
+def test_mlp_pilot_recommends_five_seeds_on_auroc_spread_only(
+    setup_run: tuple[experiment.Config, RunDir, RunDir],
+    tiny_gpt2: LoadedModel,
+    monkeypatch: pytest.MonkeyPatch,
+    areas: tuple[float, ...],
+    pairs: tuple[float, ...],
+    expected: bool,
+) -> None:
+    config, _, _ = setup_run
+    source = experiment._prepare(
+        config, tiny_gpt2, [m2._task("sentiment")], _sources()
+    )[0]
+    train, select, report = experiment._draw_rows(source.splits, "last", 0)
+    monkeypatch.setattr(experiment, "auroc", lambda *_: np.array(areas))
+    monkeypatch.setattr(
+        experiment, "group_accuracy", lambda *_: np.array(pairs)
+    )
+    _, info = experiment._stack_choices(
+        config,
+        train,
+        select,
+        report,
+        source.baseline.logistic["last"][0],
+        seed=2,
+        pilot_diagnostics=True,
+    )
+    pilot = info["mlp_pilot"]
+    assert pilot["auroc_spread"] == pytest.approx(np.ptp(areas))
+    assert pilot["pair_accuracy_spread"] == pytest.approx(np.ptp(pairs))
+    assert pilot["recommend_five"] is expected
 
 
 def test_weighted_mean_fallback_is_off_when_layers_vary(

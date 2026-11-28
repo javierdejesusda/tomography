@@ -917,7 +917,7 @@ def _stack_choices(
             "pair_accuracies": pairs.tolist(),
             "auroc_spread": area_spread,
             "pair_accuracy_spread": pair_spread,
-            "recommend_five": max(area_spread, pair_spread) > 0.01,
+            "recommend_five": area_spread > 0.01,
         }
     choices["stack_mlp", "all"] = _matrix_choice(
         train.layers,
