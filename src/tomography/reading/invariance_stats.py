@@ -33,6 +33,16 @@ N_RESAMPLES = 10_000
 GATE_MARGIN = 0.02
 CLEAN_MARGIN = 0.01
 TIE_MARGIN = 0.005
+READER_ARMS = ("A5", "A6", "A7", "A8")
+LEAD = "A6"
+LEAD_ABLATION = "A5"
+STAGE2_BASELINES = tuple(f"B{i}" for i in range(1, 10))
+LAST_TOKEN_LR = "B3"
+RANDOM_DIRECTION = "random_direction"
+ALPHA = 0.05
+NON_INFERIORITY_MARGIN = 0.02
+FAMILY_SIZES = {"qwen": 16, "llama": 8}
+REQUIRED_WINS = {"qwen": 9, "llama": 5}
 
 # Preregistered thresholds are compared with this slack, so that float
 # rounding of an exact rational AUROC never decides a boundary case.
@@ -397,4 +407,383 @@ def stage1_gate(
         bootstrap,
         not reasons,
         tuple(reasons),
+    )
+
+
+@dataclass(frozen=True)
+class Combination:
+    """Report scores of one checkpoint on one task (section 7.1).
+
+    Attributes:
+        family: Model family, a key of `FAMILY_SIZES`.
+        checkpoint: Checkpoint name.
+        reader: Name of the frozen stage 1 winner within `scores`.
+        scores: Scores of the reader, the baselines B1 to B9 and any
+            controls. Every other name is a control: it never enters the
+            best baseline (section 5.5). `random_direction` is the random
+            direction control and `A5` the two-position augmented control.
+    """
+
+    family: str
+    checkpoint: str
+    reader: str
+    scores: TaskScores
+
+    def __post_init__(self) -> None:
+        """Validates the readers of the combination.
+
+        Raises:
+            ValueError: If a baseline is missing, the reader is not a
+                stage 2 candidate or is missing, or the reader is A6
+                without the A5 control.
+        """
+        names = self.scores.readers
+        missing = [b for b in STAGE2_BASELINES if b not in names]
+        if missing:
+            raise ValueError(f"combination lacks the baselines {missing}")
+        if self.reader not in READER_ARMS or self.reader not in names:
+            raise ValueError(
+                f"the reader must be one of {READER_ARMS} and have scores,"
+                f" got {self.reader}"
+            )
+        if self.reader == LEAD and LEAD_ABLATION not in names:
+            raise ValueError("an A6 reader needs the A5 control (section 7.6)")
+
+    @property
+    def task(self) -> str:
+        """Task name."""
+        return self.scores.task
+
+
+@dataclass(frozen=True)
+class Estimate:
+    """A point estimate with its two-sided 95% percentile interval.
+
+    Attributes:
+        estimate: Value on the full set of pairs.
+        interval: 2.5th and 97.5th percentiles over resamples.
+    """
+
+    estimate: float
+    interval: tuple[float, float]
+
+
+@dataclass(frozen=True)
+class CombinationTest:
+    """Endpoint and tests of one combination (sections 7.2 to 7.4, 7.6).
+
+    Attributes:
+        family: Model family.
+        checkpoint: Checkpoint name.
+        task: Task name.
+        reader: The reader.
+        auroc: Reader to condition to draw-averaged AUROC, for every reader,
+            baseline and control.
+        worst: Reader to worst-condition AUROC `W`.
+        clean_accuracy: Reader to draw-averaged clean pair accuracy.
+        best_baseline: The baseline among B1 to B9 with the highest `W`
+            (a tie goes to the lower number).
+        delta: `W` of the reader minus the highest `W` of B1 to B9.
+        delta_interval: Two-sided 95% percentile interval of `delta`.
+        delta_bootstrap: `delta` in every resample, with the minima and the
+            maximum recomputed inside each one.
+        p_value: One-sided bootstrap p value for `delta > 0`.
+        clean_difference: Clean pair accuracy of the reader minus B3.
+        clean_lower: 2.5th percentile of `clean_difference` over resamples.
+        non_inferior: Whether `clean_lower` is above -0.02.
+        random_contrast: Reader to condition to its AUROC minus that of the
+            random direction control, for every reader but that control;
+            None without the control.
+        secondary: `W(A6) - W(A5)`; None unless the reader is A6.
+        secondary_bootstrap: The secondary contrast in every resample.
+    """
+
+    family: str
+    checkpoint: str
+    task: str
+    reader: str
+    auroc: Mapping[str, Mapping[str, float]]
+    worst: Mapping[str, float]
+    clean_accuracy: Mapping[str, float]
+    best_baseline: str
+    delta: float
+    delta_interval: tuple[float, float]
+    delta_bootstrap: FloatArray
+    p_value: float
+    clean_difference: float
+    clean_lower: float
+    non_inferior: bool
+    random_contrast: Mapping[str, Mapping[str, Estimate]] | None
+    secondary: Estimate | None
+    secondary_bootstrap: FloatArray | None
+
+
+def _combination_test(
+    combination: Combination, counts: IntArray
+) -> CombinationTest:
+    task = combination.scores
+    names = task.readers
+    index = {name: i for i, name in enumerate(names)}
+    kernel = _Kernel(task, names)
+    ones = np.ones((1, task.n_pairs), dtype=np.int64)
+    auroc = kernel.aurocs(ones)[0]
+    accuracy = kernel.clean_accuracy(ones)[0]
+    boot_auroc = kernel.aurocs(counts)
+    boot_accuracy = kernel.clean_accuracy(counts)
+    worst, boot_worst = auroc.min(axis=-1), boot_auroc.min(axis=-1)
+    reader = index[combination.reader]
+    baselines = [index[b] for b in STAGE2_BASELINES]
+    last = index[LAST_TOKEN_LR]
+    delta = float(worst[reader] - worst[baselines].max())
+    boot_delta = boot_worst[:, reader] - boot_worst[:, baselines].max(axis=1)
+    p_value = (1 + np.count_nonzero(boot_delta <= _TOL)) / (1 + len(counts))
+    boot_clean = boot_accuracy[:, reader] - boot_accuracy[:, last]
+    clean_lower = float(np.percentile(boot_clean, 2.5))
+    random_contrast = None
+    if RANDOM_DIRECTION in index:
+        control = index[RANDOM_DIRECTION]
+        bounds = np.percentile(
+            boot_auroc - boot_auroc[:, control : control + 1],
+            [2.5, 97.5],
+            axis=0,
+        )
+        random_contrast = {
+            name: {
+                condition: Estimate(
+                    float(auroc[i, c] - auroc[control, c]),
+                    (float(bounds[0, i, c]), float(bounds[1, i, c])),
+                )
+                for c, condition in enumerate(task.conditions)
+            }
+            for i, name in enumerate(names)
+            if i != control
+        }
+    secondary = secondary_bootstrap = None
+    if combination.reader == LEAD:
+        ablation = index[LEAD_ABLATION]
+        secondary_bootstrap = boot_worst[:, reader] - boot_worst[:, ablation]
+        secondary = Estimate(
+            float(worst[reader] - worst[ablation]),
+            _percentile_interval(secondary_bootstrap),
+        )
+    return CombinationTest(
+        family=combination.family,
+        checkpoint=combination.checkpoint,
+        task=task.task,
+        reader=combination.reader,
+        auroc={
+            name: dict(zip(task.conditions, map(float, auroc[i]), strict=True))
+            for i, name in enumerate(names)
+        },
+        worst=dict(zip(names, map(float, worst), strict=True)),
+        clean_accuracy=dict(zip(names, map(float, accuracy), strict=True)),
+        best_baseline=STAGE2_BASELINES[int(np.argmax(worst[baselines]))],
+        delta=delta,
+        delta_interval=_percentile_interval(boot_delta),
+        delta_bootstrap=boot_delta,
+        p_value=float(p_value),
+        clean_difference=float(accuracy[reader] - accuracy[last]),
+        clean_lower=clean_lower,
+        non_inferior=clean_lower > -NON_INFERIORITY_MARGIN + _TOL,
+        random_contrast=random_contrast,
+        secondary=secondary,
+        secondary_bootstrap=secondary_bootstrap,
+    )
+
+
+def bootstrap_combination(
+    combination: Combination,
+    *,
+    rng: np.random.Generator | int,
+    n_resamples: int = N_RESAMPLES,
+) -> CombinationTest:
+    """Runs the paired bootstrap of one combination (sections 7.2 to 7.4).
+
+    Both texts of a pair, all conditions, readers and draws follow the
+    pair; the resample is one call of `resample_pairs`.
+
+    Args:
+        combination: Report scores of the combination.
+        rng: Seed or generator of the bootstrap.
+        n_resamples: Number of bootstrap resamples.
+
+    Returns:
+        The endpoint, its p value and the clean non-inferiority check.
+    """
+    counts = resample_pairs(
+        combination.scores.n_pairs, n_resamples, _as_rng(rng)
+    )
+    return _combination_test(combination, counts)
+
+
+def holm_adjust(p_values: FloatArray) -> FloatArray:
+    """Adjusts p values of one family with the Holm step-down procedure.
+
+    Args:
+        p_values: Unadjusted p values of the family.
+
+    Returns:
+        Adjusted p values in the input order; a hypothesis is rejected at
+        level alpha when its adjusted p value is below alpha.
+    """
+    values = np.asarray(p_values, dtype=np.float64)
+    order = np.argsort(values, kind="stable")
+    steps = values[order] * (values.size - np.arange(values.size))
+    adjusted = np.empty_like(values)
+    adjusted[order] = np.minimum(np.maximum.accumulate(steps), 1.0)
+    return adjusted
+
+
+@dataclass(frozen=True)
+class PooledEffect:
+    """A mean over combinations with its bootstrap (section 7.5).
+
+    Attributes:
+        estimate: Mean over the combinations on the full set of pairs.
+        interval: Two-sided 95% percentile interval.
+        bootstrap: The mean in every resample.
+        above_zero: Whether the lower bound of the interval is above 0.
+    """
+
+    estimate: float
+    interval: tuple[float, float]
+    bootstrap: FloatArray
+    above_zero: bool
+
+
+def _pooled(
+    estimates: Sequence[float], boots: Sequence[FloatArray]
+) -> PooledEffect:
+    bootstrap = np.mean(np.stack(boots), axis=0)
+    interval = _percentile_interval(bootstrap)
+    return PooledEffect(
+        float(np.mean(estimates)), interval, bootstrap, interval[0] > _TOL
+    )
+
+
+@dataclass(frozen=True)
+class Stage2Result:
+    """The stage 2 decision (sections 7.3 to 7.6).
+
+    Attributes:
+        combinations: The test of every combination, in input order.
+        holm_p_value: Holm-adjusted p value of each combination, within
+            its family.
+        win: Whether each combination is a win: adjusted p value below 0.05
+            and clean non-inferiority.
+        wins: Family to its number of wins.
+        pooled: Mean `delta` over all combinations.
+        pooled_by_family: Family to its mean `delta`.
+        pooled_secondary: Mean A6 minus A5 contrast; None unless the
+            reader is A6.
+        h2: Whether H2 holds: at least 9 of 16 Qwen wins, at least 5 of 8
+            Llama wins and a pooled effect above 0.
+    """
+
+    combinations: tuple[CombinationTest, ...]
+    holm_p_value: tuple[float, ...]
+    win: tuple[bool, ...]
+    wins: Mapping[str, int]
+    pooled: PooledEffect
+    pooled_by_family: Mapping[str, PooledEffect]
+    pooled_secondary: PooledEffect | None
+    h2: bool
+
+
+def _check_stage2(combinations: Sequence[Combination]) -> dict[str, int]:
+    keys = [(c.family, c.checkpoint, c.task) for c in combinations]
+    if len(set(keys)) != len(keys):
+        raise ValueError("each checkpoint and task must appear once")
+    if len({c.reader for c in combinations}) > 1:
+        raise ValueError("every combination needs the same frozen reader")
+    pairs: dict[str, int] = {}
+    for c in combinations:
+        if pairs.setdefault(c.task, c.scores.n_pairs) != c.scores.n_pairs:
+            raise ValueError(f"task {c.task} has different numbers of pairs")
+    sizes = {f: sum(c.family == f for c in combinations) for f in FAMILY_SIZES}
+    if sizes != FAMILY_SIZES or len(keys) != sum(FAMILY_SIZES.values()):
+        raise ValueError(f"each family needs exactly {FAMILY_SIZES}")
+    return pairs
+
+
+def stage2(
+    combinations: Sequence[Combination],
+    *,
+    rng: np.random.Generator | int,
+    n_resamples: int = N_RESAMPLES,
+) -> Stage2Result:
+    """Applies the stage 2 tests and success rule (sections 7.2 to 7.6).
+
+    Report pairs are resampled within each task, one call of
+    `resample_pairs` per task in sorted task-name order, and the same
+    resampled pairs serve every checkpoint of that task, in both families.
+    These resamples give the per-combination tests and the pooled effects.
+
+    Args:
+        combinations: The 16 Qwen and 8 Llama combinations.
+        rng: Seed or generator of the bootstrap.
+        n_resamples: Number of bootstrap resamples.
+
+    Returns:
+        Every combination's test, the Holm-corrected wins, the pooled
+        effects and whether H2 holds.
+
+    Raises:
+        ValueError: If a combination repeats, the readers differ, a task
+            has different numbers of pairs, or the families do not have
+            16 and 8 combinations.
+    """
+    pairs = _check_stage2(combinations)
+    generator = _as_rng(rng)
+    counts = {
+        task: resample_pairs(pairs[task], n_resamples, generator)
+        for task in sorted(pairs)
+    }
+    tests = tuple(_combination_test(c, counts[c.task]) for c in combinations)
+    holm = np.empty(len(tests))
+    pooled_by_family = {}
+    for family in FAMILY_SIZES:
+        members = [i for i, t in enumerate(tests) if t.family == family]
+        holm[members] = holm_adjust(
+            np.array([tests[i].p_value for i in members])
+        )
+        pooled_by_family[family] = _pooled(
+            [tests[i].delta for i in members],
+            [tests[i].delta_bootstrap for i in members],
+        )
+    win = tuple(
+        bool(p < ALPHA - _TOL and t.non_inferior)
+        for p, t in zip(holm, tests, strict=True)
+    )
+    wins = {
+        family: sum(
+            w for w, t in zip(win, tests, strict=True) if t.family == family
+        )
+        for family in FAMILY_SIZES
+    }
+    pooled = _pooled(
+        [t.delta for t in tests], [t.delta_bootstrap for t in tests]
+    )
+    pooled_secondary = None
+    if tests[0].secondary is not None:
+        pooled_secondary = _pooled(
+            [t.secondary.estimate for t in tests if t.secondary is not None],
+            [
+                t.secondary_bootstrap
+                for t in tests
+                if t.secondary_bootstrap is not None
+            ],
+        )
+    h2 = pooled.above_zero and all(
+        wins[family] >= REQUIRED_WINS[family] for family in FAMILY_SIZES
+    )
+    return Stage2Result(
+        tests,
+        tuple(map(float, holm)),
+        win,
+        wins,
+        pooled,
+        pooled_by_family,
+        pooled_secondary,
+        h2,
     )
