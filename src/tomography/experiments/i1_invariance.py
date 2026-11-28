@@ -7,20 +7,39 @@ set of section 7.1, defined but not run here) and the stage 0 activation
 cache of section 10. Section numbers in the docstrings refer to that file.
 """
 
+from collections.abc import Iterable
 from collections.abc import Mapping
+from collections.abc import Sequence
+import csv
 from dataclasses import dataclass
 from dataclasses import replace
+import io
+from pathlib import Path
+import re
 from types import MappingProxyType
 from typing import TYPE_CHECKING
+from typing import Any
 from typing import Literal
 from typing import get_args
 
 import numpy as np
 
+from tomography.datasets.ethics import load_ethics_utility
+from tomography.datasets.facts import load_facts
+from tomography.datasets.geometry_of_truth import SOURCE as GOT_SOURCE
+from tomography.datasets.geometry_of_truth import load_geometry_of_truth
 from tomography.datasets.records import Example
+from tomography.datasets.sources import fetch
+from tomography.datasets.sst2 import load_sst2
 from tomography.experiments.base import derive_seed
+from tomography.experiments.m2_readers import POLARITY_TASKS
 from tomography.experiments.variants import READING_TASKS
 from tomography.experiments.variants import ReadingTask
+from tomography.experiments.variants import eval_pairs
+from tomography.experiments.variants import eval_seed
+from tomography.experiments.variants import task_set
+from tomography.experiments.variants import task_splits
+from tomography.experiments.variants import template_variants
 from tomography.model import LoadedModel
 from tomography.templates import ChatFormat
 from tomography.templates import Span
@@ -33,6 +52,8 @@ TASKS: tuple[TaskName, ...] = get_args(TaskName)
 Placement = Literal["pre", "head", "post"]
 LevelRule = Literal["random", "against"]
 WordingSet = Literal["fit", "score", "test"]
+NEGATION_SUBSETS: tuple[str, ...] = POLARITY_TASKS["truth_polarity"]
+_QUOTED = re.compile(r"'([^']+)'")
 
 # The fallback date of the Llama 3.2 chat template; passing it keeps the
 # rendered prompts independent of the day of the run.
@@ -432,3 +453,800 @@ def chat_format(loaded: LoadedModel) -> ChatFormat:
     ):
         return chat_from_tokenizer(loaded.tokenizer)
     return ChatFormat("plain")
+
+
+BlockName = Literal["report", "validation", "fit", "pool"]
+BLOCKS: tuple[BlockName, ...] = get_args(BlockName)
+SENTIMENT_MIN_WORDS = 3
+REPORT_MIN_WORDS = 10
+M2_EVAL_PAIRS = 256
+M2_SEED = 0
+
+
+@dataclass(frozen=True)
+class BlockSizes:
+    """The block sizes of section 2.4.
+
+    Attributes:
+        report: Pairs of the reserved report block.
+        validation: Pairs of the validation block.
+        fit: Pairs of the fit reservoir.
+        pool: Texts of the unlabelled pool.
+    """
+
+    report: int = 256
+    validation: int = 200
+    fit: int = 192
+    pool: int = 640
+
+
+PREREGISTERED_SIZES = BlockSizes()
+
+
+@dataclass(frozen=True)
+class Block:
+    """One block of a partition.
+
+    Attributes:
+        name: One of `BLOCKS`.
+        keys: The group keys the block holds, in hash order. A key belongs
+            to one block only, even when some of its texts are not used.
+        examples: The texts used: both members of each pair in pair order,
+            or the pool texts.
+        pairs: The (label 1 uid, label 0 uid) pairs; empty for the pool.
+    """
+
+    name: BlockName
+    keys: tuple[str, ...]
+    examples: tuple[Example, ...]
+    pairs: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class TaskPartition:
+    """The blocks of one task and the counts the preregistration states.
+
+    Attributes:
+        task: One of `TASKS`.
+        blocks: The blocks by name, in `BLOCKS` order.
+        counts: Source and filter counts, such as "burned_candidates".
+        notes: Logged events: fallback group keys and a short pool.
+    """
+
+    task: str
+    blocks: Mapping[str, Block]
+    counts: Mapping[str, int]
+    notes: tuple[str, ...]
+
+    def item_ids(self) -> dict[str, dict[str, list[Any]]]:
+        """Returns the keys, uids and pairs of every block, for the run dir.
+
+        Returns:
+            By block name, the lists "keys", "uids" and "pairs".
+        """
+        return {
+            name: {
+                "keys": list(block.keys),
+                "uids": [e.uid for e in block.examples],
+                "pairs": [list(pair) for pair in block.pairs],
+            }
+            for name, block in self.blocks.items()
+        }
+
+
+def hash_order(task: str, keys: Iterable[str], *, seed: int) -> list[str]:
+    """Orders group keys by a seeded hash (section 2.4).
+
+    Args:
+        task: The task, part of the hash.
+        keys: Group keys; repeats are dropped.
+        seed: The base seed.
+
+    Returns:
+        The distinct keys sorted by `derive_seed(seed, "i1", "partition",
+        task, key)`, ties broken by the key.
+    """
+    return sorted(
+        set(keys),
+        key=lambda key: (derive_seed(seed, "i1", "partition", task, key), key),
+    )
+
+
+def _rows(members: Sequence[Example]) -> list[tuple[Example, Example]]:
+    """Pairs the two scenarios of each source row, label 1 first."""
+    by_row: dict[str, list[Example]] = {}
+    for example in members:
+        by_row.setdefault(str(example.meta["pair"]), []).append(example)
+    rows = []
+    for row in by_row.values():
+        first = [e for e in row if e.label == 1]
+        second = [e for e in row if e.label == 0]
+        if len(first) == 1 and len(second) == 1:
+            rows.append((first[0], second[0]))
+    return rows
+
+
+def fill_pairs(
+    name: BlockName,
+    order: Sequence[str],
+    groups: Mapping[str, Sequence[Example]],
+    n_pairs: int,
+    *,
+    by_row: bool = False,
+) -> Block:
+    """Fills a labelled block by walking group keys in hash order.
+
+    A group joins the block whole. For label-contrastive tasks it joins
+    when one of its texts has a label still below `n_pairs`, and the pairs
+    are the i-th label 1 text with the i-th label 0 text in block order. For
+    utility (`by_row`) it joins while the block has fewer than `n_pairs`
+    rows, and each source row is one pair. Texts of a joined group beyond
+    the quota stay in the block unused.
+
+    Args:
+        name: The block name.
+        order: Group keys in hash order.
+        groups: The texts of each key, in source order.
+        n_pairs: The number of pairs.
+        by_row: Pair the two scenarios of each source row.
+
+    Returns:
+        The block.
+
+    Raises:
+        ValueError: If the groups hold fewer than `n_pairs` pairs.
+    """
+    keys: list[str] = []
+    first: list[Example] = []
+    second: list[Example] = []
+    rows: list[tuple[Example, Example]] = []
+    for key in order:
+        members = groups[key]
+        if by_row:
+            if len(rows) >= n_pairs:
+                break
+            rows.extend(_rows(members))
+        else:
+            if len(first) >= n_pairs and len(second) >= n_pairs:
+                break
+            if not any(
+                (e.label == 1 and len(first) < n_pairs)
+                or (e.label == 0 and len(second) < n_pairs)
+                for e in members
+            ):
+                continue
+            first.extend(e for e in members if e.label == 1)
+            second.extend(e for e in members if e.label == 0)
+        keys.append(key)
+    pairs = rows if by_row else list(zip(first, second, strict=False))
+    if len(pairs) < n_pairs:
+        raise ValueError(
+            f"the {name} block has {len(pairs)} of {n_pairs} pairs"
+        )
+    pairs = pairs[:n_pairs]
+    return Block(
+        name,
+        tuple(keys),
+        tuple(e for pair in pairs for e in pair),
+        tuple((a.uid, b.uid) for a, b in pairs),
+    )
+
+
+def fill_pool(
+    name: BlockName,
+    order: Sequence[str],
+    groups: Mapping[str, Sequence[Example]],
+    n_texts: int,
+) -> Block:
+    """Takes texts in hash order without reading their labels (section 4).
+
+    Args:
+        name: The block name.
+        order: Group keys in hash order.
+        groups: The texts of each key, in source order.
+        n_texts: The number of texts; fewer are taken when fewer remain.
+
+    Returns:
+        The block, without pairs.
+    """
+    keys: list[str] = []
+    texts: list[Example] = []
+    for key in order:
+        if len(texts) >= n_texts:
+            break
+        keys.append(key)
+        texts.extend(groups[key][: n_texts - len(texts)])
+    return Block(name, tuple(keys), tuple(texts), ())
+
+
+def _without(
+    groups: Mapping[str, Sequence[Example]], block: Block
+) -> dict[str, Sequence[Example]]:
+    taken = set(block.keys)
+    return {k: v for k, v in groups.items() if k not in taken}
+
+
+def _finish(
+    task: str,
+    blocks: Sequence[Block],
+    rest: Mapping[str, Sequence[Example]],
+    counts: dict[str, int],
+    notes: list[str],
+    sizes: BlockSizes,
+    seed: int,
+) -> TaskPartition:
+    """Adds the pool to the labelled blocks and builds the partition."""
+    pool = fill_pool(
+        "pool", hash_order(task, rest, seed=seed), rest, sizes.pool
+    )
+    counts["pool_texts"] = len(pool.examples)
+    if len(pool.examples) < sizes.pool:
+        notes.append(
+            f"{task}: the pool takes all {len(pool.examples)} remaining texts "
+            f"(of {sizes.pool})"
+        )
+    by_name = {block.name: block for block in (*blocks, pool)}
+    return TaskPartition(
+        task,
+        MappingProxyType({name: by_name[name] for name in BLOCKS}),
+        MappingProxyType(dict(counts)),
+        tuple(notes),
+    )
+
+
+def normalize_words(text: str) -> str:
+    """Lower-cases a text and collapses its whitespace (section 2.4)."""
+    return " ".join(text.lower().split())
+
+
+def normalize_statement(text: str) -> str:
+    """Normalizes a statement: `normalize_words`, trailing period removed."""
+    words = normalize_words(text)
+    return words[:-1] if words.endswith(".") else words
+
+
+def _runs(words: str, lengths: Iterable[int] | None = None) -> set[str]:
+    """Returns the contiguous runs of whole words of a normalized text."""
+    tokens = words.split()
+    sizes = range(1, len(tokens) + 1) if lengths is None else lengths
+    return {
+        " ".join(tokens[i : i + size])
+        for size in sizes
+        for i in range(len(tokens) - size + 1)
+    }
+
+
+def contains_words(text: str, part: str) -> bool:
+    """Whether `part` is a contiguous run of whole words of `text`.
+
+    Both texts are normalized with `normalize_words` first.
+
+    Args:
+        text: The containing text.
+        part: The contained text.
+
+    Returns:
+        True when the normalized `part` is a run of the normalized `text`.
+    """
+    return normalize_words(part) in _runs(normalize_words(text))
+
+
+class _Overlap:
+    """Tests whether a text contains, or is contained in, reference texts."""
+
+    def __init__(self, texts: Iterable[str]) -> None:
+        self._texts = {normalize_words(t) for t in texts}
+        self._lengths = sorted({len(t.split()) for t in self._texts})
+        self._runs: set[str] = set()
+        for text in self._texts:
+            self._runs |= _runs(text)
+
+    def __call__(self, text: str) -> bool:
+        words = normalize_words(text)
+        if words in self._runs:
+            return True
+        return not self._texts.isdisjoint(_runs(words, self._lengths))
+
+
+def _singletons(examples: Iterable[Example]) -> dict[str, Sequence[Example]]:
+    return {e.uid: (e,) for e in examples}
+
+
+def _held_in_blocks(
+    task: str,
+    groups: Mapping[str, Sequence[Example]],
+    sizes: BlockSizes,
+    seed: int,
+    *,
+    by_row: bool = False,
+) -> tuple[Block, Block, dict[str, Sequence[Example]]]:
+    """Fills validation then fit from the same groups; returns the rest."""
+    validation = fill_pairs(
+        "validation",
+        hash_order(task, groups, seed=seed),
+        groups,
+        sizes.validation,
+        by_row=by_row,
+    )
+    rest = _without(groups, validation)
+    fit = fill_pairs(
+        "fit",
+        hash_order(task, rest, seed=seed),
+        rest,
+        sizes.fit,
+        by_row=by_row,
+    )
+    return validation, fit, _without(rest, fit)
+
+
+def partition_sentiment(
+    examples: Sequence[Example],
+    *,
+    sizes: BlockSizes = PREREGISTERED_SIZES,
+    seed: int = 0,
+) -> TaskPartition:
+    """Partitions SST-2 for the sentiment task (section 2.4).
+
+    The group key is the uid; stage 0 and 1 items are train texts of at
+    least 3 words. Report candidates are train texts of at least 10 words;
+    a candidate that contains, or is contained in, a validation sentence is
+    removed from the candidates. After the report block, every train item
+    that contains or is contained in a report text is removed; after the
+    validation block, the same holds for validation texts. Containment is
+    on `normalize_words` text, as a contiguous run of whole words.
+
+    Args:
+        examples: The SST-2 loader output (train and val splits).
+        sizes: The block sizes.
+        seed: The base seed of the hash.
+
+    Returns:
+        The partition. Counts: "train", "candidates_positive" and
+        "candidates_negative" (before the burn), "burned_candidates",
+        "removed_by_report", "removed_by_validation", "pool_texts".
+
+    Raises:
+        ValueError: If a block cannot be filled.
+    """
+    task = "sentiment"
+    train = [
+        e
+        for e in examples
+        if e.split == "train" and len(e.text.split()) >= SENTIMENT_MIN_WORDS
+    ]
+    candidates = [e for e in train if len(e.text.split()) >= REPORT_MIN_WORDS]
+    burned_by = _Overlap(e.text for e in examples if e.split == "val")
+    kept = [e for e in candidates if not burned_by(e.text)]
+    counts = {
+        "train": len(train),
+        "candidates_positive": sum(e.label == 1 for e in candidates),
+        "candidates_negative": sum(e.label == 0 for e in candidates),
+        "burned_candidates": len(candidates) - len(kept),
+    }
+    report_groups = _singletons(kept)
+    report = fill_pairs(
+        "report",
+        hash_order(task, report_groups, seed=seed),
+        report_groups,
+        sizes.report,
+    )
+    overlaps_report = _Overlap(e.text for e in report.examples)
+    rest = [e for e in train if not overlaps_report(e.text)]
+    counts["removed_by_report"] = len(train) - len(rest)
+    groups = _singletons(rest)
+    validation = fill_pairs(
+        "validation",
+        hash_order(task, groups, seed=seed),
+        groups,
+        sizes.validation,
+    )
+    overlaps_validation = _Overlap(e.text for e in validation.examples)
+    left = _without(groups, validation)
+    after = {
+        k: v for k, v in left.items() if not overlaps_validation(v[0].text)
+    }
+    counts["removed_by_validation"] = len(left) - len(after)
+    fit = fill_pairs(
+        "fit", hash_order(task, after, seed=seed), after, sizes.fit
+    )
+    return _finish(
+        task,
+        (report, validation, fit),
+        _without(after, fit),
+        counts,
+        [],
+        sizes,
+        seed,
+    )
+
+
+def partition_truth(
+    common: Sequence[Example],
+    facts: Sequence[Example],
+    *,
+    sizes: BlockSizes = PREREGISTERED_SIZES,
+    seed: int = 0,
+) -> TaskPartition:
+    """Partitions `common_claim_true_false` for the truth task (section 2.4).
+
+    Statements equal to a facts statement under `normalize_statement` are
+    removed. Repeats under the same normalization keep their first row, and
+    a statement with copies in two source splits is removed from both. The
+    report block comes from the test split, the other blocks from the train
+    split; the group key is the uid.
+
+    Args:
+        common: The `common_claim_true_false` rows of the loader.
+        facts: The facts loader output.
+        sizes: The block sizes.
+        seed: The base seed of the hash.
+
+    Returns:
+        The partition. Counts: "facts_matches", "train", "train_true",
+        "test", "test_true", "pool_texts".
+
+    Raises:
+        ValueError: If a block cannot be filled.
+    """
+    task = "truth"
+    burned = {normalize_statement(e.text) for e in facts}
+    rows = [e for e in common if normalize_statement(e.text) not in burned]
+    copies: dict[str, list[Example]] = {}
+    for example in rows:
+        copies.setdefault(normalize_statement(example.text), []).append(example)
+    kept = [v[0] for v in copies.values() if len({e.split for e in v}) == 1]
+    train = [e for e in kept if e.split == "train"]
+    test = [e for e in kept if e.split == "test"]
+    counts = {
+        "facts_matches": len(common) - len(rows),
+        "train": len(train),
+        "train_true": sum(e.label == 1 for e in train),
+        "test": len(test),
+        "test_true": sum(e.label == 1 for e in test),
+    }
+    report_groups = _singletons(test)
+    report = fill_pairs(
+        "report",
+        hash_order(task, report_groups, seed=seed),
+        report_groups,
+        sizes.report,
+    )
+    validation, fit, rest = _held_in_blocks(
+        task, _singletons(train), sizes, seed
+    )
+    return _finish(
+        task, (report, validation, fit), rest, counts, [], sizes, seed
+    )
+
+
+def negation_subjects(
+    examples: Sequence[Example], cities: Mapping[str, Sequence[str]]
+) -> tuple[dict[str, str], list[str]]:
+    """Returns the subject of every negations statement (section 2.4).
+
+    The subject is the `city` column of the city files (looked up by the
+    row index in the uid) or the first quoted word of a translation
+    statement. When neither is found, the key is the uid and a note logs
+    the fallback and its reason.
+
+    Args:
+        examples: The rows of the four negation subsets.
+        cities: The `city` column of each city file, by subset, in row
+            order.
+
+    Returns:
+        The group key of each uid ("city:<name>", "es:<word>" or
+        "uid:<uid>") and the fallback notes.
+    """
+    keys: dict[str, str] = {}
+    notes: list[str] = []
+    for example in examples:
+        subset = str(example.meta.get("subset"))
+        reason = ""
+        if subset in cities:
+            index = example.uid.removeprefix(f"got-{subset}-")
+            column = cities[subset]
+            if (
+                index.isdigit()
+                and int(index) < len(column)
+                and column[int(index)].strip()
+            ):
+                keys[example.uid] = f"city:{column[int(index)].strip()}"
+                continue
+            reason = "no city in the city column"
+        else:
+            match = _QUOTED.search(example.text)
+            if match:
+                keys[example.uid] = f"es:{match.group(1)}"
+                continue
+            reason = "no quoted word in the statement"
+        keys[example.uid] = f"uid:{example.uid}"
+        notes.append(f"{example.uid}: {reason}; the group key is the uid")
+    return keys, notes
+
+
+def partition_negations(
+    examples: Sequence[Example],
+    subjects: Mapping[str, str],
+    *,
+    sizes: BlockSizes = PREREGISTERED_SIZES,
+    seed: int = 0,
+) -> TaskPartition:
+    """Partitions the four negation subsets by subject (section 2.4).
+
+    Repeats under `normalize_statement` collapse to their first row, and a
+    train statement with a copy in the validation or test split is removed
+    everywhere, so a train statement is kept iff all its copies are in the
+    train split. The report block is drawn only from subjects whose every
+    source row is in the train split; the other blocks take the remaining
+    subjects of the kept train statements.
+
+    Args:
+        examples: The rows of the four subsets, in loader order.
+        subjects: The group key of each uid, from `negation_subjects`.
+        sizes: The block sizes.
+        seed: The base seed of the hash.
+
+    Returns:
+        The partition. Counts: "repeated_statements",
+        "train_repeating_eval", "train_distinct", "eligible_subjects",
+        "eligible_statements", "eligible_city_statements",
+        "eligible_spanish_statements", "eligible_pairs", "pool_texts".
+
+    Raises:
+        ValueError: If a block cannot be filled.
+    """
+    task = "truth_negations"
+    copies: dict[str, list[Example]] = {}
+    for example in examples:
+        copies.setdefault(normalize_statement(example.text), []).append(example)
+    splits_of = {k: {e.split for e in v} for k, v in copies.items()}
+    kept = [v[0] for k, v in copies.items() if splits_of[k] == {"train"}]
+    subject_splits: dict[str, set[str]] = {}
+    for example in examples:
+        subject_splits.setdefault(subjects[example.uid], set()).add(
+            example.split
+        )
+    groups: dict[str, list[Example]] = {}
+    for example in kept:
+        groups.setdefault(subjects[example.uid], []).append(example)
+    eligible = {
+        k: v for k, v in groups.items() if subject_splits[k] == {"train"}
+    }
+    statements = [e for v in eligible.values() for e in v]
+    counts = {
+        "repeated_statements": sum(len(v) > 1 for v in copies.values()),
+        "train_repeating_eval": sum(
+            e.split == "train"
+            and splits_of[normalize_statement(e.text)] != {"train"}
+            for e in examples
+        ),
+        "train_distinct": len(kept),
+        "eligible_subjects": len(eligible),
+        "eligible_statements": len(statements),
+        "eligible_city_statements": sum(
+            "cities" in str(e.meta.get("subset")) for e in statements
+        ),
+        "eligible_spanish_statements": sum(
+            "sp_en" in str(e.meta.get("subset")) for e in statements
+        ),
+        "eligible_pairs": min(
+            sum(e.label == 1 for e in statements),
+            sum(e.label == 0 for e in statements),
+        ),
+    }
+    report = fill_pairs(
+        "report", hash_order(task, eligible, seed=seed), eligible, sizes.report
+    )
+    validation, fit, rest = _held_in_blocks(
+        task, _without(groups, report), sizes, seed
+    )
+    return _finish(
+        task, (report, validation, fit), rest, counts, [], sizes, seed
+    )
+
+
+def partition_utility(
+    examples: Sequence[Example],
+    m2_report: frozenset[str],
+    *,
+    sizes: BlockSizes = PREREGISTERED_SIZES,
+    seed: int = 0,
+) -> TaskPartition:
+    """Partitions ETHICS utilitarianism by linked group (section 2.4).
+
+    Rows are linked by a shared scenario text, directly or through a chain
+    of rows, over the source train and test files together; the group key
+    is the first row of each linked group. A test row is a report candidate
+    iff its group holds no row of the source train file (train or val
+    split) and none of `m2_report`. Groups are never split. The other
+    blocks take the train-split rows.
+
+    Args:
+        examples: The utility loader output.
+        m2_report: The row ids (`meta["pair"]`) of the M2 report pairs.
+        sizes: The block sizes.
+        seed: The base seed of the hash.
+
+    Returns:
+        The partition. Counts: "test_pairs", "report_candidate_pairs",
+        "report_candidate_groups", "pool_texts".
+
+    Raises:
+        ValueError: If a block cannot be filled.
+    """
+    task = "utility"
+    rows: dict[str, list[Example]] = {}
+    for example in examples:
+        rows.setdefault(str(example.meta["pair"]), []).append(example)
+    parent: dict[str, str] = {}
+
+    def find(text: str) -> str:
+        root = parent.setdefault(text, text)
+        while parent[root] != root:
+            root = parent[root]
+        while parent[text] != root:
+            parent[text], text = root, parent[text]
+        return root
+
+    for members in rows.values():
+        for other in members[1:]:
+            parent[find(members[0].text)] = find(other.text)
+    key_of_root: dict[str, str] = {}
+    group_of = {
+        pair: key_of_root.setdefault(find(members[0].text), pair)
+        for pair, members in rows.items()
+    }
+    excluded = {
+        group_of[pair]
+        for pair, members in rows.items()
+        if members[0].split != "test" or pair in m2_report
+    }
+    test_groups: dict[str, list[Example]] = {}
+    train_groups: dict[str, list[Example]] = {}
+    for pair, members in rows.items():
+        split = members[0].split
+        if split == "test" and group_of[pair] not in excluded:
+            test_groups.setdefault(group_of[pair], []).extend(members)
+        elif split == "train":
+            train_groups.setdefault(group_of[pair], []).extend(members)
+    counts = {
+        "test_pairs": sum(m[0].split == "test" for m in rows.values()),
+        "report_candidate_pairs": sum(
+            len(_rows(v)) for v in test_groups.values()
+        ),
+        "report_candidate_groups": len(test_groups),
+    }
+    report = fill_pairs(
+        "report",
+        hash_order(task, test_groups, seed=seed),
+        test_groups,
+        sizes.report,
+        by_row=True,
+    )
+    validation, fit, rest = _held_in_blocks(
+        task, train_groups, sizes, seed, by_row=True
+    )
+    return _finish(
+        task, (report, validation, fit), rest, counts, [], sizes, seed
+    )
+
+
+def m2_utility_report_pairs(
+    examples: Sequence[Example],
+    *,
+    n_pairs: int = M2_EVAL_PAIRS,
+    seed: int = M2_SEED,
+) -> frozenset[str]:
+    """Recomputes the utility report pairs M2 read (section 2.4).
+
+    Uses `task_splits` and `task_set` with the report seed of `eval_seed`,
+    as M2 does; the pairing depends on the task and the seed only, never on
+    the chat format.
+
+    Args:
+        examples: The utility loader output.
+        n_pairs: The M2 number of evaluation pairs.
+        seed: The M2 base seed.
+
+    Returns:
+        The row ids (`meta["pair"]`) of the pairs.
+    """
+    task = READING_TASKS["utility"]
+    splits = task_splits(task, {task.source: examples}, seed=seed)
+    variants, _ = template_variants(task, ChatFormat("plain"), kinds=("paper",))
+    stimuli = task_set(
+        task,
+        variants[0],
+        splits.report,
+        n_pairs=eval_pairs(task, splits.report, n_pairs),
+        seed=eval_seed(task, "report", seed),
+    )
+    return frozenset(uid.rpartition(":")[0] for uid in stimuli.uids)
+
+
+def draws(
+    partition: TaskPartition,
+    *,
+    n_draws: int = 10,
+    n_pairs: int = 64,
+    seed: int = 0,
+) -> tuple[tuple[tuple[str, str], ...], ...]:
+    """Returns the labelled training draws of a task (section 2.4).
+
+    Args:
+        partition: The task partition.
+        n_draws: The number of draws.
+        n_pairs: The pairs per draw.
+        seed: The base seed.
+
+    Returns:
+        For each draw, the first `n_pairs` pairs of a seeded permutation of
+        the fit reservoir. The draws do not depend on the model.
+    """
+    fit = partition.blocks["fit"].pairs
+    out = []
+    for index in range(n_draws):
+        order = np.random.default_rng(
+            derive_seed(seed, "i1", "draw", partition.task, index)
+        ).permutation(len(fit))
+        out.append(tuple(fit[i] for i in order[:n_pairs]))
+    return tuple(out)
+
+
+def _city_column(subset: str, cache: Path | None, offline: bool) -> list[str]:
+    path = fetch(
+        GOT_SOURCE, file=f"datasets/{subset}.csv", cache=cache, offline=offline
+    )
+    reader = csv.DictReader(io.StringIO(path.read_bytes().decode("utf-8")))
+    if "city" not in (reader.fieldnames or ()):
+        return []
+    return [row["city"] for row in reader]
+
+
+def load_partitions(
+    *,
+    sizes: BlockSizes = PREREGISTERED_SIZES,
+    seed: int = 0,
+    cache: Path | None = None,
+    offline: bool = False,
+) -> dict[str, TaskPartition]:
+    """Loads the pinned sources and partitions the four tasks.
+
+    Args:
+        sizes: The block sizes.
+        seed: The base seed of the hash.
+        cache: Dataset cache directory; None uses the repository default.
+        offline: Read only from the cache.
+
+    Returns:
+        The partition of each task, in `TASKS` order.
+    """
+    sst2 = load_sst2(cache=cache, offline=offline)
+    common = load_geometry_of_truth(
+        subsets=("common_claim_true_false",), cache=cache, offline=offline
+    )
+    facts = load_facts(cache=cache, offline=offline)
+    negations = load_geometry_of_truth(
+        subsets=NEGATION_SUBSETS, cache=cache, offline=offline
+    )
+    cities = {
+        subset: _city_column(subset, cache, offline)
+        for subset in NEGATION_SUBSETS
+        if "cities" in subset
+    }
+    subjects, notes = negation_subjects(negations, cities)
+    utility = load_ethics_utility(cache=cache, offline=offline)
+    negation_part = partition_negations(
+        negations, subjects, sizes=sizes, seed=seed
+    )
+    return {
+        "sentiment": partition_sentiment(sst2, sizes=sizes, seed=seed),
+        "truth": partition_truth(common, facts, sizes=sizes, seed=seed),
+        "truth_negations": replace(
+            negation_part, notes=(*notes, *negation_part.notes)
+        ),
+        "utility": partition_utility(
+            utility, m2_utility_report_pairs(utility), sizes=sizes, seed=seed
+        ),
+    }
