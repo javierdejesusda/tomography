@@ -1,10 +1,14 @@
 """Tests of the invariance readers of the preregistration, sections 4 and 5."""
 
+from dataclasses import replace
+
 import numpy as np
 from numpy.typing import NDArray
 import pytest
 
+from tomography.activations import Activations
 from tomography.reading import invariance as inv
+from tomography.reading.probes import fit_attention
 
 
 def _renderings(k: int) -> inv.Renderings:
@@ -446,3 +450,306 @@ def test_random_subspace_keeps_the_spectrum_of_sigma_e() -> None:
         np.linalg.eigvalsh(rotated), np.linalg.eigvalsh(sigma), atol=1e-10
     )
     assert not np.allclose(rotated, sigma)
+
+
+def _class_scatter(
+    z: NDArray[np.float64], groups: NDArray[np.int64]
+) -> NDArray[np.float64]:
+    total = np.zeros((z.shape[1], z.shape[1]))
+    for group in np.unique(groups):
+        centred = z[groups == group] - z[groups == group].mean(axis=0)
+        total += centred.T @ centred
+    return total
+
+
+def _ulda_weight(
+    scatter: NDArray[np.float64], d_hat: NDArray[np.float64], alpha: float
+) -> NDArray[np.float64]:
+    d = d_hat.size
+    shrunk = (1 - alpha) * scatter + alpha * np.trace(scatter) / d * np.eye(d)
+    return np.asarray(np.linalg.solve(shrunk, d_hat))
+
+
+def _far_pool(data: inv.LabelledSet) -> inv.Pool:
+    pool = _pool()
+    last = pool.last.astype(np.float64)
+    last[..., 0] += 50.0 * np.sign(data.last[..., 0].mean())
+    return inv.Pool(
+        stim=pool.stim,
+        last=last,
+        renderings=pool.renderings,
+        layers=pool.layers,
+    )
+
+
+def test_a7_follows_the_formula_of_section_5_2() -> None:
+    data, pool = _labelled(signal=1.5), _pool()
+    reader = inv.fit_fixed(
+        inv.ARMS["A7"], data, pool, inv.Candidate((1,), alpha=0.3)
+    )
+    clean = data.last[1, :, 0]
+    z = _standardized(clean, clean)
+    d_hat = z[data.labels == 1].mean(0) - z[data.labels == 0].mean(0)
+    g = inv.fit_fixed(
+        inv.ARMS["A1"], data, None, inv.Candidate((1,), lam=inv.PSEUDO_LAMBDA)
+    )
+    pseudo = (g.score(pool.stim[:, :, 0], pool.last[:, :, 0]) > 0).astype(int)
+    assert 2 <= pseudo.sum() <= pseudo.size - 2
+    pool_z = _standardized(pool.last[1, :, 0], clean)
+    scatter = _class_scatter(pool_z, pseudo) / (pseudo.size - 2)
+    np.testing.assert_allclose(
+        reader.blocks[0].weight, _ulda_weight(scatter, d_hat, 0.3), rtol=1e-8
+    )
+    assert reader.fallbacks == 0
+    assert reader.params == {"alpha": 0.3}
+
+
+def test_a8_follows_the_formula_of_section_5_2() -> None:
+    data, pool = _labelled(signal=1.5), _pool()
+    reader = inv.fit_fixed(
+        inv.ARMS["A8"], data, pool, inv.Candidate((2,), alpha=0.1)
+    )
+    clean = data.last[2, :, 0]
+    z = _standardized(data.last[2], clean).mean(axis=1)
+    d_hat = z[data.labels == 1].mean(0) - z[data.labels == 0].mean(0)
+    g = inv.fit_fixed(
+        inv.ARMS["A3"], data, None, inv.Candidate((2,), lam=inv.PSEUDO_LAMBDA)
+    )
+    pseudo = (g.score(pool.stim[:, :, 0], pool.last[:, :, 0]) > 0).astype(int)
+    assert 2 <= pseudo.sum() <= pseudo.size - 2
+    pool_z = _standardized(pool.last[2], clean)
+    m, k = pool_z.shape[:2]
+    scatter = sum(_class_scatter(pool_z[:, a], pseudo) for a in range(k))
+    weight = _ulda_weight(scatter / (m * k - 2 * k), d_hat, 0.1)
+    np.testing.assert_allclose(reader.blocks[0].weight, weight, rtol=1e-8)
+
+
+def test_a7_and_a8_fall_back_to_the_pool_mean_and_count_it() -> None:
+    data = _labelled(signal=1.5)
+    pool = _far_pool(data)
+    clean = data.last[1, :, 0]
+    pool_z = _standardized(pool.last[1], clean)
+    m, k = pool_z.shape[:2]
+    one_group = np.zeros(m, dtype=np.int64)
+    z = _standardized(clean, clean)
+    d_hat = z[data.labels == 1].mean(0) - z[data.labels == 0].mean(0)
+    a7 = inv.fit_fixed(
+        inv.ARMS["A7"], data, pool, inv.Candidate((1,), alpha=0.3)
+    )
+    scatter = _class_scatter(pool_z[:, 0], one_group) / (m - 1)
+    np.testing.assert_allclose(
+        a7.blocks[0].weight, _ulda_weight(scatter, d_hat, 0.3), rtol=1e-8
+    )
+    assert a7.fallbacks == 1
+    aug_z = _standardized(data.last[1], clean).mean(axis=1)
+    aug_d = aug_z[data.labels == 1].mean(0) - aug_z[data.labels == 0].mean(0)
+    a8 = inv.fit_fixed(
+        inv.ARMS["A8"], data, pool, inv.Candidate((1,), alpha=0.3)
+    )
+    scatter = sum(_class_scatter(pool_z[:, a], one_group) for a in range(k))
+    np.testing.assert_allclose(
+        a8.blocks[0].weight,
+        _ulda_weight(scatter / (m * k - k), aug_d, 0.3),
+        rtol=1e-8,
+    )
+    for name in ("A7", "A8"):
+        tuning = inv.tune(inv.ARMS[name], data, pool, seed=0)
+        assert tuning.fits == 4 * 3 + 1
+        assert tuning.fallbacks == tuning.fits
+
+
+def test_a7_is_plain_and_a8_augmented() -> None:
+    data, pool = _labelled(signal=0.6), _pool()
+    a7 = inv.tune(inv.ARMS["A7"], data, pool, seed=2)
+    a8 = inv.tune(inv.ARMS["A8"], data, pool, seed=2)
+    assert len(a7.candidates) == 3 * len(inv.ALPHAS)
+    for c in range(len(a7.candidates)):
+        assert a7.criteria[c] == inv.auroc(a7.oof[c, 0], data.labels)
+        assert a8.criteria[c] == min(
+            inv.auroc(a8.oof[c, k], data.labels) for k in range(4)
+        )
+    assert a7.fits == a8.fits == 4 * 3 + 1
+
+
+def test_baselines_reuse_the_arms() -> None:
+    for baseline, arm in (
+        ("B3", "A1"),
+        ("B4", "A2"),
+        ("B8", "A3"),
+        ("B9", "A4"),
+    ):
+        assert inv.ARMS[baseline].positions == inv.ARMS[arm].positions
+        assert inv.ARMS[baseline].augmented == inv.ARMS[arm].augmented
+        assert inv.ARMS[baseline].family == inv.ARMS[arm].family
+
+
+def test_b1_is_the_difference_of_class_means() -> None:
+    data = _labelled(signal=0.6)
+    tuning = inv.tune(inv.ARMS["B1"], data, None, seed=0)
+    (block,) = tuning.reader.blocks
+    clean = data.last[block.index, :, 0]
+    z = _standardized(clean, clean)
+    d_hat = z[data.labels == 1].mean(0) - z[data.labels == 0].mean(0)
+    np.testing.assert_allclose(block.weight, d_hat)
+    assert tuning.reader.bias == 0.0
+    assert inv.ARMS["B2"].positions == ("stim",)
+    assert len(tuning.candidates) == 3
+
+
+def test_b6_averages_standardized_layer_scores() -> None:
+    data = _labelled(signal=0.6)
+    tuning = inv.fit_depth_mean(data, seed=4)
+    lam = tuning.choice.lam
+    assert lam in inv.LAMBDAS
+    x = (data.stim[:, :, 1], data.last[:, :, 1])
+    expected = np.zeros(data.labels.size)
+    for layer in range(3):
+        reader = inv.fit_fixed(
+            inv.ARMS["A1"], data, None, inv.Candidate((layer,), lam=lam)
+        )
+        fitted = reader.score(data.stim[:, :, 0], data.last[:, :, 0])
+        expected += (reader.score(*x) - fitted.mean()) / fitted.std() / 3
+    np.testing.assert_allclose(tuning.reader.score(*x), expected, atol=1e-9)
+    for c in range(len(tuning.candidates)):
+        assert tuning.criteria[c] == inv.auroc(tuning.oof[c, 0], data.labels)
+
+
+def _hand_scores(
+    labels: NDArray[np.int64], wrong: list[set[int]]
+) -> NDArray[np.float64]:
+    scores = np.where(labels == 1, 1.0, -1.0) * np.ones((len(wrong), 1))
+    for layer, texts in enumerate(wrong):
+        for text in texts:
+            scores[layer, text] *= -1.0
+    return scores
+
+
+def test_b7_adds_the_layer_with_the_smallest_largest_double_fault() -> None:
+    labels = np.array([1, 1, 1, 0, 0, 0])
+    scores = _hand_scores(labels, [{0, 1}, {0, 1}, {2, 3}, {0, 4}])
+    aurocs = np.array([0.9, 0.8, 0.8, 0.7])
+    assert inv.greedy_layers(scores, labels, aurocs, size=4) == (0, 2, 3, 1)
+
+
+def test_b7_breaks_double_fault_ties_by_auroc_then_depth() -> None:
+    labels = np.array([1, 1, 1, 0, 0, 0])
+    scores = _hand_scores(labels, [{0, 1}, {2, 3}, {4, 5}])
+    higher = np.array([0.9, 0.7, 0.8])
+    assert inv.greedy_layers(scores, labels, higher, size=2) == (0, 2)
+    equal = np.array([0.9, 0.8, 0.8])
+    assert inv.greedy_layers(scores, labels, equal, size=2) == (0, 1)
+    best_is_deep = np.array([0.8, 0.7, 0.8])
+    assert inv.greedy_layers(scores, labels, best_is_deep, size=1) == (0,)
+
+
+def test_b7_stacks_five_layers_on_standardized_out_of_fold_scores() -> None:
+    data = _labelled(signal=0.6, n_layers=6)
+    stack = inv.fit_stack(data, seed=1)
+    assert len(stack.layers) == 5
+    assert len(set(stack.layers)) == 5
+    a1 = inv.tune(inv.ARMS["A1"], data, None, seed=1)
+    assert stack.layers[0] == a1.choice.layers[0]
+    y = 2.0 * data.labels - 1.0
+    z = (stack.oof - stack.oof_mean[:, None]) / stack.oof_scale[:, None]
+    r = -y * _sigmoid(-y * (stack.weight @ z + stack.bias)) / y.size
+    assert np.abs(z @ r + inv.STACK_LAMBDA * stack.weight).max() < 1e-6
+    x = (data.stim[:, :, 2], data.last[:, :, 2])
+    expected = np.full(y.size, stack.bias)
+    for k, (layer, lam) in enumerate(
+        zip(stack.layers, stack.lambdas, strict=True)
+    ):
+        reader = inv.fit_fixed(
+            inv.ARMS["A1"], data, None, inv.Candidate((layer,), lam=lam)
+        )
+        standard = (reader.score(*x) - stack.oof_mean[k]) / stack.oof_scale[k]
+        expected += stack.weight[k] * standard
+    np.testing.assert_allclose(stack.reader.score(*x), expected, atol=1e-9)
+
+
+def test_random_direction_is_the_m2_random_reader() -> None:
+    from tomography.reading.reader import RepReader
+
+    data = _labelled(signal=0.6)
+    reader = inv.fit_random_direction(data, index=2, seed=11)
+    clean = data.last[2, :, 0]
+    z = _standardized(clean, clean)
+    reference = RepReader.fit(
+        "random",
+        z[None],
+        [12],
+        labels=data.labels,
+        pairs=inv.pair_matrix(data.pairs),
+        seed=11,
+    )
+    expected = reference.score(z[None])[0]
+    np.testing.assert_allclose(
+        reader.score(data.stim[:, :, 0], data.last[:, :, 0]),
+        expected,
+        atol=1e-5,
+    )
+    assert np.linalg.norm(reader.blocks[0].weight) == pytest.approx(1.0)
+
+
+def test_shuffled_labels_stay_within_pairs() -> None:
+    data = _labelled(n_pairs=32)
+    shuffled = inv.shuffle_within_pairs(data, seed=3)
+    assert not np.array_equal(shuffled.labels, data.labels)
+    for pair in range(32):
+        assert sorted(shuffled.labels[data.pairs == pair]) == [0, 1]
+    np.testing.assert_array_equal(
+        shuffled.labels, inv.shuffle_within_pairs(data, seed=3).labels
+    )
+    assert shuffled.stim is data.stim
+
+
+def test_text_only_is_the_word_tfidf_regression() -> None:
+    from tomography.p9.risk import text_scores
+
+    train = ["good film", "bad film", "good plot", "bad plot", "good", "bad"]
+    labels = np.array([1, 0, 1, 0, 1, 0])
+    test = ["good film plot", "bad"]
+    np.testing.assert_array_equal(
+        inv.text_only_scores(train, labels, test),
+        text_scores(train, labels, test, analyzer="word"),
+    )
+
+
+def _token_acts(seed: int, n: int, layers: tuple[int, ...]) -> Activations:
+    rng = np.random.default_rng(seed)
+    tokens = 3
+    y = np.tile(np.array([-1.0, 1.0]), n // 2)
+    data = rng.normal(size=(len(layers), n * tokens, 4))
+    data[0, :, 0] += np.repeat(y, tokens)
+    return Activations(
+        data=data.astype(np.float32),
+        layers=layers,
+        position="response",
+        row_stimulus=np.repeat(np.arange(n), tokens),
+        row_rank=np.tile(np.arange(tokens), n),
+        row_token=np.tile(np.arange(tokens), n),
+        row_token_id=np.zeros(n * tokens, dtype=np.int64),
+        n_stimuli=n,
+    )
+
+
+def test_b5_tunes_the_m2_attention_reader_with_c_from_lambda() -> None:
+    acts = _token_acts(0, 16, (4, 6))
+    labels = np.tile(np.array([0, 1]), 8)
+    pairs = np.repeat(np.arange(8), 2)
+    tuning = inv.tune_attention(acts, labels, pairs, seed=2)
+    assert tuning.layer in (4, 6)
+    for c, (index, lam) in enumerate(tuning.candidates):
+        assert lam in inv.LAMBDAS
+        assert index in (0, 1)
+        assert tuning.criteria[c] == inv.auroc(tuning.oof[c], labels)
+    index = acts.layers.index(tuning.layer)
+    single = replace(acts, data=acts.data[[index]], layers=(tuning.layer,))
+    reference = fit_attention(
+        single,
+        labels=labels,
+        pairs=inv.pair_matrix(pairs),
+        c=1.0 / (16 * tuning.lam),
+    )
+    np.testing.assert_allclose(
+        tuning.score(acts), reference.score(single)[0], atol=1e-6
+    )

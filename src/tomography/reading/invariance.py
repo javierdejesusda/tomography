@@ -15,6 +15,7 @@ The canonical re-prompt oracle of section 5.5 needs no reader code: it is
 the clean rendering of a report text scored by a fitted reader.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from dataclasses import replace
 from itertools import pairwise
@@ -26,6 +27,13 @@ from numpy.typing import NDArray
 from scipy.optimize import minimize
 from scipy.special import expit
 from scipy.stats import rankdata
+
+from tomography.activations import Activations
+from tomography.experiments.sweep import shuffle_within_groups
+from tomography.p9.risk import text_scores
+from tomography.reading.probes import AttentionReader
+from tomography.reading.probes import fit_attention
+from tomography.reading.reader import RepReader
 
 Level = Literal["none", "random", "against"]
 FloatArray = NDArray[np.floating]
@@ -330,6 +338,14 @@ ARMS: dict[str, Spec] = {
         Spec(
             "random_subspace", "lr", ("stim", "last"), True, "random_subspace"
         ),
+        Spec("A7", "ulda", ("last",), False),
+        Spec("A8", "ulda", ("last",), True),
+        Spec("B1", "mean_diff", ("last",), False),
+        Spec("B2", "mean_diff", ("stim",), False),
+        Spec("B3", "lr", ("last",), False),
+        Spec("B4", "lr", ("stim",), False),
+        Spec("B8", "lr", ("last",), True),
+        Spec("B9", "lr", ("stim",), True),
     )
 }
 
@@ -664,7 +680,79 @@ def _group_fits(
     stats: Stats,
     candidates: list[Candidate],
 ) -> list[Fit]:
+    if spec.family == "mean_diff":
+        phi = _phi(data, spec.positions, layers, stats)
+        return [(_class_difference(phi[:, 0], data.labels), 0.0, False)]
+    if spec.family == "ulda":
+        return _ulda_group(spec, data, pool, layers, stats, candidates)
     return _lr_group(spec, data, pool, layers, stats, candidates)
+
+
+def _class_difference(
+    x: NDArray[np.float64], labels: NDArray[np.int64]
+) -> NDArray[np.float64]:
+    return np.asarray(x[labels == 1].mean(axis=0) - x[labels == 0].mean(axis=0))
+
+
+def _ulda_group(
+    spec: Spec,
+    data: LabelledSet,
+    pool: Pool | None,
+    layers: tuple[int, ...],
+    stats: Stats,
+    candidates: list[Candidate],
+) -> list[Fit]:
+    """U-LDA (A7, A8) at one layer for every `alpha`.
+
+    `d_hat` comes from the labelled texts (and, for A8, their copies, each
+    text weighted 1). The pseudo-labeller is the A1 (A8: A3) objective at
+    `PSEUDO_LAMBDA` on the same texts and layer; it labels each pool text
+    from its clean rendering. `S` is centred per pseudo-class (and, for
+    A8, per wrapper) with denominator `K' (M - 2)`, `K'` = 1 for A7 and K
+    for A8; if a pseudo-class holds fewer than 2 pool texts, `S` is centred
+    on the pool mean instead with denominator `K' (M - 1)`.
+    """
+    source = _check_pool(pool, data)
+    phi = _phi(data, spec.positions, layers, stats)
+    texts = phi.mean(axis=1) if spec.augmented else phi[:, 0]
+    d_hat = _class_difference(texts, data.labels)
+    labeller = Spec("g", "lr", spec.positions, spec.augmented)
+    weight, bias, _ = _lr_group(
+        labeller,
+        data,
+        None,
+        layers,
+        stats,
+        [Candidate(layers, lam=PSEUDO_LAMBDA)],
+    )[0]
+    pool_phi = _phi(source, spec.positions, layers, stats)
+    positive = pool_phi[:, 0] @ weight + bias > 0
+    m = positive.size
+    fallback = min(int(positive.sum()), m - int(positive.sum())) < 2
+    renderings = range(pool_phi.shape[1]) if spec.augmented else range(1)
+    scatter = np.zeros((d_hat.size, d_hat.size))
+    for a in renderings:
+        x = pool_phi[:, a]
+        if fallback:
+            centred = x - x.mean(axis=0)
+        else:
+            centred = x.copy()
+            centred[positive] -= x[positive].mean(axis=0)
+            centred[~positive] -= x[~positive].mean(axis=0)
+        scatter += centred.T @ centred
+    groups = 1 if fallback else 2
+    spectrum, u = np.linalg.eigh(scatter / (len(renderings) * (m - groups)))
+    spectrum = np.clip(spectrum, 0.0, None)
+    target = spectrum.sum() / d_hat.size
+    projected = u.T @ d_hat
+    return [
+        (
+            u @ (projected / ((1 - c.alpha) * spectrum + c.alpha * target)),
+            0.0,
+            fallback,
+        )
+        for c in candidates
+    ]
 
 
 def _fit_candidates(
@@ -760,6 +848,35 @@ def _best(candidates: list[Candidate], criteria: NDArray[np.float64]) -> int:
     )
 
 
+def _out_of_fold(
+    data: LabelledSet,
+    seed: int,
+    fit: Callable[[LabelledSet], tuple[list[LinearReader], int]],
+) -> tuple[NDArray[np.float64], NDArray[np.int64], int]:
+    """Out-of-fold scores of every text under every rendering.
+
+    Returns:
+        The scores, shape (n_readers, K, n), the fold of each text and the
+        fallbacks the fold fits reported.
+    """
+    folds = fold_ids(data.pairs, seed=seed)
+    oof: NDArray[np.float64] | None = None
+    fallbacks = 0
+    for fold in np.unique(folds):
+        test = np.flatnonzero(folds == fold)
+        readers, used = fit(data.subset(np.flatnonzero(folds != fold)))
+        fallbacks += used
+        if oof is None:
+            shape = (len(readers), len(data.renderings.names), folds.size)
+            oof = np.empty(shape)
+        stim, last = data.stim[:, test], data.last[:, test]
+        for c, reader in enumerate(readers):
+            for k in range(len(data.renderings.names)):
+                oof[c, k, test] = reader.score(stim[:, :, k], last[:, :, k])
+    assert oof is not None
+    return oof, folds, fallbacks
+
+
 def tune(
     spec: Spec,
     data: LabelledSet,
@@ -801,19 +918,9 @@ def tune(
     else:
         choices = [layers]
     candidates = _grid(spec, choices)
-    folds = fold_ids(data.pairs, seed=seed)
-    n_renderings = len(data.renderings.names)
-    oof = np.empty((len(candidates), n_renderings, data.labels.size))
-    fallbacks = 0
-    for fold in np.unique(folds):
-        test = np.flatnonzero(folds == fold)
-        train = data.subset(np.flatnonzero(folds != fold))
-        readers, used = _fit_candidates(spec, train, pool, candidates)
-        fallbacks += used
-        stim, last = data.stim[:, test], data.last[:, test]
-        for c, reader in enumerate(readers):
-            for k in range(n_renderings):
-                oof[c, k, test] = reader.score(stim[:, :, k], last[:, :, k])
+    oof, folds, fallbacks = _out_of_fold(
+        data, seed, lambda train: _fit_candidates(spec, train, pool, candidates)
+    )
     criteria = np.array(
         [_criterion(scores, data.labels, spec.augmented) for scores in oof]
     )
@@ -872,3 +979,415 @@ def fit_arm(
     if len(spec.positions) == 2 and layers is None:
         layers = two_position_layers(data, seed=seed)
     return tune(spec, data, pool, seed=seed, layers=layers)
+
+
+def pair_matrix(pairs: NDArray[np.int64]) -> NDArray[np.int64]:
+    """The texts of every pair as rows of indices.
+
+    Args:
+        pairs: Pair index of each text, shape (n,), two texts per pair.
+
+    Returns:
+        Text indices of shape (m, 2), one row per pair in pair order.
+    """
+    return np.stack([np.flatnonzero(pairs == p) for p in np.unique(pairs)])
+
+
+def _depth_mean(data: LabelledSet, lam: float) -> LinearReader:
+    """B6 at a fixed `lambda`: the mean of standardized layer scores."""
+    n_layers = len(data.layers)
+    clean = (data.stim[:, :, 0], data.last[:, :, 0])
+    blocks = []
+    bias = 0.0
+    for index in range(n_layers):
+        layer = fit_fixed(ARMS["A1"], data, None, Candidate((index,), lam=lam))
+        fitted = layer.score(*clean)
+        spread = float(fitted.std()) or 1.0
+        scale = spread * n_layers
+        (block,) = layer.blocks
+        blocks.append(replace(block, weight=block.weight / scale))
+        bias += (layer.bias - float(fitted.mean())) / scale
+    return LinearReader("B6", tuple(blocks), bias, {"lambda": lam})
+
+
+def fit_depth_mean(data: LabelledSet, *, seed: int) -> Tuning:
+    """B6, the depth mean adapted from HalluTracer (section 5.4).
+
+    One A1 objective per candidate layer at the last token, with one shared
+    `lambda`; each layer's score is standardized with the mean and standard
+    deviation of its in-sample scores on the clean texts of the fit (zero
+    standard deviation: divided by 1), and the reader scores the uniform
+    mean over layers. `lambda` is chosen on the cross-validated clean AUROC
+    of that mean, ties to the larger `lambda`.
+
+    Args:
+        data: The labelled texts of the draw.
+        seed: Seed of the fold permutation.
+
+    Returns:
+        The tuning; every candidate spans all layers.
+    """
+    every = tuple(range(len(data.layers)))
+    candidates = [Candidate(every, lam=lam) for lam in LAMBDAS]
+    oof, folds, _ = _out_of_fold(
+        data,
+        seed,
+        lambda train: ([_depth_mean(train, lam) for lam in LAMBDAS], 0),
+    )
+    criteria = np.array([auroc(scores[0], data.labels) for scores in oof])
+    best = _best(candidates, criteria)
+    reader = _depth_mean(data, candidates[best].lam)
+    return Tuning(
+        reader=replace(reader, criterion=float(criteria[best])),
+        choice=candidates[best],
+        candidates=tuple(candidates),
+        criteria=criteria,
+        oof=oof,
+        folds=folds,
+        fits=np.unique(folds).size + 1,
+        fallbacks=0,
+    )
+
+
+def greedy_layers(
+    scores: NDArray[np.float64],
+    labels: NDArray[np.int64],
+    aurocs: NDArray[np.float64],
+    *,
+    size: int,
+    start: int | None = None,
+) -> tuple[int, ...]:
+    """The greedy layer choice of B7 (section 5.4).
+
+    A text is misclassified by a layer when its prediction (label 1 if and
+    only if the score is above 0) differs from its label; the double-fault
+    rate of two layers is the share of texts both misclassify. Starting
+    from `start`, each step adds the layer that minimizes the largest
+    pairwise double-fault rate of the chosen set; ties go to the higher
+    AUROC, then the shallower layer.
+
+    Args:
+        scores: Out-of-fold scores of shape (L, n).
+        labels: 0/1 labels of shape (n,).
+        aurocs: Cross-validated AUROC of each layer, shape (L,).
+        size: Number of layers to choose.
+        start: First layer; by default the highest AUROC, ties to the
+            shallower layer.
+
+    Returns:
+        Layer indices in the order they were chosen.
+    """
+    wrong = (scores > 0) != (labels == 1)
+    double = (wrong[:, None, :] & wrong[None, :, :]).mean(axis=2)
+    n_layers = scores.shape[0]
+    if start is None:
+        start = max(range(n_layers), key=lambda layer: (aurocs[layer], -layer))
+    chosen = [start]
+
+    def largest(layer: int) -> float:
+        members = [*chosen, layer]
+        return max(
+            float(double[a, b]) for a in members for b in members if a < b
+        )
+
+    while len(chosen) < min(size, n_layers):
+        rest = [layer for layer in range(n_layers) if layer not in chosen]
+        chosen.append(
+            min(rest, key=lambda layer: (largest(layer), -aurocs[layer], layer))
+        )
+    return tuple(chosen)
+
+
+@dataclass(frozen=True, eq=False)
+class Stack:
+    """B7, the 5-layer stack adapted from Nordby, Pais and Parrack.
+
+    Attributes:
+        reader: The stack as one linear reader: refitted layer readers,
+            standardized with the out-of-fold statistics, then the stacker.
+        layers: Candidate-layer indices in the order they were chosen.
+        lambdas: The A1 `lambda` of each chosen layer.
+        oof: Out-of-fold clean scores of the chosen layers, shape (5, n).
+        oof_mean: Mean of each row of `oof`.
+        oof_scale: Standard deviation of each row (zero: 1).
+        weight: Stacker weights, shape (5,).
+        bias: Stacker intercept.
+    """
+
+    reader: LinearReader
+    layers: tuple[int, ...]
+    lambdas: tuple[float, ...]
+    oof: NDArray[np.float64]
+    oof_mean: NDArray[np.float64]
+    oof_scale: NDArray[np.float64]
+    weight: NDArray[np.float64]
+    bias: float
+
+
+def fit_stack(
+    data: LabelledSet,
+    *,
+    seed: int,
+    a1: Tuning | None = None,
+    size: int = 5,
+) -> Stack:
+    """B7 (section 5.4): five A1 layers chosen greedily, then stacked.
+
+    Each layer keeps its own A1 tuning (`lambda` with the best
+    cross-validated clean AUROC at that layer, ties to the larger). The
+    greedy choice runs on the out-of-fold scores of the n texts and starts
+    from the layer A1 selects. The stacker is the A1 objective at
+    `STACK_LAMBDA` on the chosen out-of-fold scores, each standardized with
+    its mean and standard deviation over the n texts.
+
+    Args:
+        data: The labelled texts of the draw.
+        seed: Seed of the fold permutation.
+        a1: The A1 tuning of the draw, recomputed if None.
+        size: Number of stacked layers.
+
+    Returns:
+        The stack.
+    """
+    if a1 is None:
+        a1 = tune(ARMS["A1"], data, None, seed=seed)
+    per_layer = []
+    for index in range(len(data.layers)):
+        members = [
+            c for c, cand in enumerate(a1.candidates) if cand.layers == (index,)
+        ]
+        per_layer.append(
+            max(members, key=lambda c: (a1.criteria[c], a1.candidates[c].lam))
+        )
+    scores = a1.oof[per_layer, 0]
+    order = greedy_layers(
+        scores,
+        data.labels,
+        a1.criteria[per_layer],
+        size=size,
+        start=a1.choice.layers[0],
+    )
+    oof = scores[list(order)]
+    mean = oof.mean(axis=1)
+    spread = oof.std(axis=1)
+    spread[spread == 0.0] = 1.0
+    z = ((oof - mean[:, None]) / spread[:, None]).T
+    y = 2.0 * data.labels.astype(np.float64) - 1.0
+    eigenvalues, vectors = np.linalg.eigh(z @ z.T)
+    c, bias = _span_fit(
+        eigenvalues / STACK_LAMBDA, vectors, y, np.full(y.size, 1.0 / y.size)
+    )
+    weight = z.T @ c / STACK_LAMBDA
+    lambdas = tuple(a1.candidates[per_layer[i]].lam for i in order)
+    blocks = []
+    total = bias
+    for k, (index, lam) in enumerate(zip(order, lambdas, strict=True)):
+        layer = fit_fixed(ARMS["A1"], data, None, Candidate((index,), lam=lam))
+        (block,) = layer.blocks
+        factor = weight[k] / spread[k]
+        blocks.append(replace(block, weight=block.weight * factor))
+        total += factor * (layer.bias - mean[k])
+    reader = LinearReader(
+        "B7", tuple(blocks), total, {"stack_lambda": STACK_LAMBDA}
+    )
+    return Stack(reader, order, lambdas, oof, mean, spread, weight, bias)
+
+
+def fit_random_direction(
+    data: LabelledSet, *, index: int, seed: int
+) -> LinearReader:
+    """The random-direction control of section 5.5.
+
+    The M2 `random` reader (`RepReader.fit` with method "random") on the
+    standardized clean last-token features at candidate layer `index` (the
+    layer of B3): a seeded random unit direction, centred on the mean of
+    the texts and oriented on the training labels by pair.
+
+    Args:
+        data: The labelled texts of the fit.
+        index: Candidate-layer index, the layer B3 selects.
+        seed: Seed of the direction.
+
+    Returns:
+        The reader.
+    """
+    mean, scale = standardization(data.last[index, :, 0])
+    z = (np.asarray(data.last[index, :, 0], np.float64) - mean) / scale
+    rep = RepReader.fit(
+        "random",
+        z[None],
+        [data.layers[index]],
+        labels=data.labels,
+        pairs=pair_matrix(data.pairs),
+        seed=seed,
+    )
+    weight = float(rep.signs[0]) * rep.directions[0].astype(np.float64)
+    block = Block("last", data.layers[index], index, mean, scale, weight)
+    bias = -float(weight @ rep.means[0].astype(np.float64))
+    return LinearReader("random_direction", (block,), bias, {})
+
+
+def shuffle_within_pairs(data: LabelledSet, *, seed: int) -> LabelledSet:
+    """Labels shuffled within pairs, for the shuffled-labels control.
+
+    Uses `shuffle_within_groups` of the sweep, as M2 does; refit the frozen
+    winner on the result with `fit_arm`.
+
+    Args:
+        data: The labelled texts of the draw.
+        seed: Seed of the shuffle.
+
+    Returns:
+        The same texts with shuffled labels.
+    """
+    labels = shuffle_within_groups(
+        data.labels, pair_matrix(data.pairs), seed=seed
+    )
+    return replace(data, labels=labels)
+
+
+def text_only_scores(
+    train_texts: list[str],
+    train_labels: NDArray[np.int64],
+    test_texts: list[str],
+) -> NDArray[np.float64]:
+    """The text-only control: word TF-IDF logistic regression (section 5.5).
+
+    Args:
+        train_texts: The labelled stimulus texts of the fit.
+        train_labels: Their 0/1 labels.
+        test_texts: The stimulus texts to score.
+
+    Returns:
+        Scores of the test texts.
+    """
+    return text_scores(train_texts, train_labels, test_texts, analyzer="word")
+
+
+def _stimuli(acts: Activations, index: NDArray[np.int64]) -> Activations:
+    rows = np.isin(acts.row_stimulus, index)
+    return replace(
+        acts,
+        data=acts.data[:, rows],
+        row_stimulus=np.searchsorted(index, acts.row_stimulus[rows]),
+        row_rank=acts.row_rank[rows],
+        row_token=acts.row_token[rows],
+        row_token_id=acts.row_token_id[rows],
+        n_stimuli=index.size,
+    )
+
+
+def _one_layer(acts: Activations, index: int) -> Activations:
+    return replace(acts, data=acts.data[[index]], layers=(acts.layers[index],))
+
+
+def _attention(
+    acts: Activations,
+    labels: NDArray[np.int64],
+    pairs: NDArray[np.int64],
+    lam: float,
+) -> AttentionReader:
+    return fit_attention(
+        acts,
+        labels=labels,
+        pairs=pair_matrix(pairs),
+        c=1.0 / (labels.size * lam),
+    )
+
+
+@dataclass(frozen=True, eq=False)
+class AttentionTuning:
+    """B5, the M2 attention reader, tuned as in section 5.3.
+
+    Attributes:
+        reader: The reader refitted on all texts at the chosen layer.
+        layer: The chosen model layer.
+        lam: The chosen `lambda`, fitted with `c = 1 / (n lambda)`.
+        criterion: Its cross-validated clean AUROC.
+        candidates: (layer index in `acts.layers`, `lambda`) per candidate.
+        criteria: Cross-validated clean AUROC of each candidate.
+        oof: Out-of-fold scores, shape (n_candidates, n).
+        folds: Fold of each text.
+    """
+
+    reader: AttentionReader
+    layer: int
+    lam: float
+    criterion: float
+    candidates: tuple[tuple[int, float], ...]
+    criteria: NDArray[np.float64]
+    oof: NDArray[np.float64]
+    folds: NDArray[np.int64]
+
+    def score(self, acts: Activations) -> NDArray[np.float64]:
+        """Scores stimuli from their token rows.
+
+        Args:
+            acts: Token rows of the stimuli at layers including `layer`.
+
+        Returns:
+            Scores of shape (n_stimuli,).
+        """
+        single = _one_layer(acts, acts.layers.index(self.layer))
+        return np.asarray(self.reader.score(single)[0], dtype=np.float64)
+
+
+def tune_attention(
+    acts: Activations,
+    labels: NDArray[np.int64],
+    pairs: NDArray[np.int64],
+    *,
+    seed: int,
+) -> AttentionTuning:
+    """B5 (section 5.4): `fit_attention` of M2, one reader per layer.
+
+    The reader keeps its own M2 objective and row scaling, not the
+    standardization of section 5.1. The grid is `LAMBDAS` mapped to
+    `c = 1 / (n lambda)` with n the texts of the fit; the layers are those
+    of `acts`, the relative depths 0.4, 0.55, 0.7, 0.85 and 1.0 rounded up,
+    which the caller selects. Folds and the clean-AUROC criterion follow
+    `tune`; ties go to the larger `lambda`, then the shallower layer.
+
+    Args:
+        acts: Token rows of the stimulus tokens of the n labelled texts
+            (clean rendering) at the candidate layers.
+        labels: 0/1 labels of shape (n,).
+        pairs: Pair index of each text, shape (n,).
+        seed: Seed of the fold permutation.
+
+    Returns:
+        The tuning, with the refitted reader.
+    """
+    candidates = [
+        (index, lam) for index in range(len(acts.layers)) for lam in LAMBDAS
+    ]
+    folds = fold_ids(pairs, seed=seed)
+    oof = np.empty((len(candidates), labels.size))
+    for fold in np.unique(folds):
+        test = np.flatnonzero(folds == fold)
+        train = np.flatnonzero(folds != fold)
+        held_out = _stimuli(acts, test)
+        for j, lam in enumerate(LAMBDAS):
+            reader = _attention(
+                _stimuli(acts, train), labels[train], pairs[train], lam
+            )
+            scores = reader.score(held_out)
+            for index in range(len(acts.layers)):
+                oof[index * len(LAMBDAS) + j, test] = scores[index]
+    criteria = np.array([auroc(scores, labels) for scores in oof])
+    best = max(
+        range(len(candidates)),
+        key=lambda c: (criteria[c], candidates[c][1], -candidates[c][0]),
+    )
+    index, lam = candidates[best]
+    reader = _attention(_one_layer(acts, index), labels, pairs, lam)
+    return AttentionTuning(
+        reader=reader,
+        layer=acts.layers[index],
+        lam=lam,
+        criterion=float(criteria[best]),
+        candidates=tuple(candidates),
+        criteria=criteria,
+        oof=oof,
+        folds=folds,
+    )
