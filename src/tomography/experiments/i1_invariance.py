@@ -7,6 +7,7 @@ set of section 7.1, defined but not run here) and the stage 0 activation
 cache of section 10. Section numbers in the docstrings refer to that file.
 """
 
+from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Mapping
 from collections.abc import Sequence
@@ -1250,3 +1251,251 @@ def load_partitions(
             utility, m2_utility_report_pairs(utility), sizes=sizes, seed=seed
         ),
     }
+
+
+@dataclass(frozen=True)
+class Prompt:
+    """One rendered prompt of a prompt set.
+
+    Attributes:
+        task: One of `TASKS`.
+        block: The block of the text.
+        uid: The uid of the text.
+        label: The label of the text. It is kept for the readers; the pool
+            labels are never passed to an estimator (section 4).
+        condition: "clean", a template name such as "F-T1", a decoy with its
+            level rule such as "S-D1/against", or "oracle/<condition>".
+        text: The full prompt.
+        stimulus_span: The character span of the stimulus in `text`.
+        level: The decoy level drawn or set, None without a decoy.
+    """
+
+    task: str
+    block: BlockName
+    uid: str
+    label: int
+    condition: str
+    text: str
+    stimulus_span: Span
+    level: str | None
+
+
+Condition = tuple[str | None, LevelRule | None]
+
+
+def _held_in_conditions(
+    task: str, wording_set: Literal["fit", "score"]
+) -> list[Condition]:
+    """The clean template and the wrappers of a held-in set.
+
+    Fit-set decoys take the `random` level only; score-set decoys take
+    `random` and `against` (sections 3.4, 3.5 and 6.1).
+    """
+    rules: tuple[LevelRule, ...] = (
+        ("random",) if wording_set == "fit" else ("random", "against")
+    )
+    out: list[Condition] = [(None, None)]
+    for name in wrapper_names(task, wording_set):
+        if WORDINGS[name].placement is None:
+            out.append((name, None))
+        else:
+            out.extend((name, rule) for rule in rules)
+    return out
+
+
+def _report_conditions(task: str) -> list[Condition]:
+    """The stage 2 conditions of section 7.1, in the order of its table."""
+    out: list[Condition] = [(None, None)]
+    for wording in (M2_TEST_DECOY, *TEST_DECOYS):
+        out.extend((wording.name, rule) for rule in ("random", "against"))
+    if task != "utility":
+        out.extend((w.name, None) for w in TEST_PARAPHRASES)
+    return out
+
+
+def _condition_name(wording: str | None, rule: LevelRule | None) -> str:
+    if wording is None:
+        return "clean"
+    return wording if rule is None else f"{wording}/{rule}"
+
+
+def _render_block(
+    task: str,
+    block: Block,
+    conditions: Sequence[Condition],
+    chat: ChatFormat,
+    *,
+    stage: int,
+    seed: int,
+) -> list[Prompt]:
+    evaluation = block.name in ("validation", "report")
+    prompts = []
+    for wording, rule in conditions:
+        for example in block.examples:
+            rendered = render_text(
+                task,
+                wording,
+                example,
+                chat,
+                rule=rule,
+                stage=stage,
+                evaluation=evaluation,
+                seed=seed,
+            )
+            prompts.append(
+                Prompt(
+                    task,
+                    block.name,
+                    example.uid,
+                    example.label,
+                    _condition_name(wording, rule),
+                    rendered.text,
+                    rendered.stimulus_span,
+                    rendered.level,
+                )
+            )
+    return prompts
+
+
+def _prompt_set(
+    partitions: Mapping[str, TaskPartition],
+    chat: ChatFormat,
+    plan: Mapping[BlockName, Callable[[str], list[Condition]]],
+    *,
+    stage: int,
+    seed: int,
+) -> list[Prompt]:
+    prompts: list[Prompt] = []
+    for task in TASKS:
+        blocks = partitions[task].blocks
+        for name, conditions in plan.items():
+            prompts += _render_block(
+                task,
+                blocks[name],
+                conditions(task),
+                chat,
+                stage=stage,
+                seed=seed,
+            )
+    return prompts
+
+
+def _fit_conditions(task: str) -> list[Condition]:
+    return _held_in_conditions(task, "fit")
+
+
+def _score_conditions(task: str) -> list[Condition]:
+    return _held_in_conditions(task, "score")
+
+
+def stage0_prompts(
+    partitions: Mapping[str, TaskPartition],
+    chat: ChatFormat,
+    *,
+    seed: int = 0,
+) -> list[Prompt]:
+    """Builds the stage 0 prompt set of section 6.1.
+
+    Fit reservoir and pool under the clean template and the fit-set
+    wrappers (`random` levels); validation pairs under the clean template
+    and the score-set wrappers (`random` and `against`). The report block is
+    not rendered and no test wording is used.
+
+    Args:
+        partitions: The partition of each task.
+        chat: The chat format of the checkpoint.
+        seed: The base seed of the `random` levels.
+
+    Returns:
+        The prompts, task by task in `TASKS` order, then by block,
+        condition and text.
+    """
+    plan: dict[BlockName, Callable[[str], list[Condition]]] = {
+        "fit": _fit_conditions,
+        "pool": _fit_conditions,
+        "validation": _score_conditions,
+    }
+    return _prompt_set(partitions, chat, plan, stage=0, seed=seed)
+
+
+def stage2_prompts(
+    partitions: Mapping[str, TaskPartition],
+    chat: ChatFormat,
+    *,
+    seed: int = 0,
+) -> list[Prompt]:
+    """Builds the stage 2 prompt set of one checkpoint (sections 7.1, 10).
+
+    Fit reservoir and pool as in stage 0, and the report pairs under the
+    conditions of section 7.1. Defined here, run only after the stage 1
+    gate.
+
+    Args:
+        partitions: The partition of each task.
+        chat: The chat format of the checkpoint.
+        seed: The base seed of the `random` levels.
+
+    Returns:
+        The prompts, task by task in `TASKS` order.
+    """
+    plan: dict[BlockName, Callable[[str], list[Condition]]] = {
+        "fit": _fit_conditions,
+        "pool": _fit_conditions,
+        "report": _report_conditions,
+    }
+    return _prompt_set(partitions, chat, plan, stage=2, seed=seed)
+
+
+def oracle_prompts(prompts: Sequence[Prompt], chat: ChatFormat) -> list[Prompt]:
+    """Renders every wrapped report text again under the clean template.
+
+    The canonical re-prompt oracle of sections 5.5 and 8.3: the wrapper is
+    stripped and the stimulus read in the clean template.
+
+    Args:
+        prompts: A stage 2 prompt set.
+        chat: The chat format of the checkpoint.
+
+    Returns:
+        One clean prompt per wrapped report prompt, in the same order, with
+        the condition "oracle/<condition>".
+    """
+    out = []
+    for prompt in prompts:
+        if prompt.block != "report" or prompt.condition == "clean":
+            continue
+        text = prompt.text[slice(*prompt.stimulus_span)]
+        example = Example(prompt.uid, text, prompt.label, "test")
+        rendered = render_text(prompt.task, None, example, chat)
+        out.append(
+            replace(
+                prompt,
+                condition=f"oracle/{prompt.condition}",
+                text=rendered.text,
+                stimulus_span=rendered.stimulus_span,
+                level=None,
+            )
+        )
+    return out
+
+
+def pool_levels(
+    prompts: Sequence[Prompt],
+) -> dict[str, dict[str, dict[str, str]]]:
+    """Returns the random level drawn for each pool text and decoy wording.
+
+    Section 9.1 compares pool texts by their random level.
+
+    Args:
+        prompts: A prompt set.
+
+    Returns:
+        By task, decoy wording and uid, the level word.
+    """
+    out: dict[str, dict[str, dict[str, str]]] = {}
+    for prompt in prompts:
+        if prompt.block == "pool" and prompt.level is not None:
+            wording = prompt.condition.split("/")[0]
+            task = out.setdefault(prompt.task, {})
+            task.setdefault(wording, {})[prompt.uid] = prompt.level
+    return out
